@@ -150,7 +150,7 @@
  *********************************************************************************************************
  *********************************************************************************************************
  */
-
+extern void BluetoothEventHandler(struct gecko_cmd_packet* evt);
 /*
  * Bluetooth stack configuration
  */
@@ -263,9 +263,9 @@ enum bg_thermometer_temperature_measurement_flag{
 static  void     App_TaskThermometer      (void *p_arg);
 static  void     BluetoothApplicationTask (void *p_arg);
 
-#ifdef OTA
-static uint8_t boot_to_dfu = 0;
-#endif
+//#ifdef OTA
+//static uint8_t boot_to_dfu = 0;
+//#endif
 
 static inline uint32_t bg_uint32_to_float(uint32_t mantissa, int32_t exponent);
 static inline void bg_thermometer_create_measurement(uint8_t* buffer, uint32_t measurement, int fahrenheit);
@@ -475,31 +475,6 @@ static  void  App_TaskThermometer(void *p_arg)
   //OSTaskDel((OS_TCB *)0, &err);
 }
 
-void BluetoothEventHandler(struct gecko_cmd_packet* evt)
-{
-  switch (BGLIB_MSG_ID(evt->header)) {
-    case gecko_evt_system_boot_id:
-    case gecko_evt_le_connection_closed_id:
-#ifdef OTA
-      if (boot_to_dfu) {
-        gecko_cmd_system_reset(2);
-      }
-#endif
-      //Start advertisement at boot, and after disconnection
-      gecko_cmd_le_gap_start_advertising(0, le_gap_general_discoverable, le_gap_connectable_scannable);
-      break;
-#ifdef OTA
-    case gecko_evt_gatt_server_user_write_request_id:
-      if (evt->data.evt_gatt_server_user_write_request.characteristic == gattdb_ota_control) {
-        //boot to dfu mode after disconnecting
-        boot_to_dfu = 1;
-        gecko_cmd_gatt_server_send_user_write_response(evt->data.evt_gatt_server_user_write_request.connection, gattdb_ota_control, bg_err_success);
-        gecko_cmd_le_connection_close(evt->data.evt_gatt_server_user_write_request.connection);
-      }
-      break;
-#endif
-  }
-}
 /***************************************************************************//**
  * @brief
  *   This is the idle hook.

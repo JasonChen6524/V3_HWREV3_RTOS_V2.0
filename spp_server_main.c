@@ -41,7 +41,7 @@
 //#define STATE_ADVERTISING 1
 //#define STATE_CONNECTED   2
 //#define STATE_SPP_MODE    3
-
+#define OTA
 /* Maximum number of iterations when polling UART RX data before sending data over BLE connection
  * set value to 0 to disable optimization -> minimum latency but may decrease throughput */
 #define UART_POLL_TIMEOUT  5000
@@ -149,6 +149,31 @@ static void send_spp_msg()
 	}
 }
 
+void BluetoothEventHandler(struct gecko_cmd_packet* evt)
+{
+  switch (BGLIB_MSG_ID(evt->header)) {
+    case gecko_evt_system_boot_id:
+    case gecko_evt_le_connection_closed_id:
+#ifdef OTA
+      if (boot_to_dfu) {
+        gecko_cmd_system_reset(2);
+      }
+#endif
+      //Start advertisement at boot, and after disconnection
+      gecko_cmd_le_gap_start_advertising(0, le_gap_general_discoverable, le_gap_connectable_scannable);
+      break;
+#ifdef OTA
+    case gecko_evt_gatt_server_user_write_request_id:
+      if (evt->data.evt_gatt_server_user_write_request.characteristic == gattdb_ota_control) {
+        //boot to dfu mode after disconnecting
+        boot_to_dfu = 1;
+        gecko_cmd_gatt_server_send_user_write_response(evt->data.evt_gatt_server_user_write_request.connection, gattdb_ota_control, bg_err_success);
+        gecko_cmd_le_connection_close(evt->data.evt_gatt_server_user_write_request.connection);
+      }
+      break;
+#endif
+  }
+}
 
 /**
  * @brief  SPP server mode main loop
