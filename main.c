@@ -150,7 +150,7 @@
  *********************************************************************************************************
  *********************************************************************************************************
  */
-extern void BluetoothEventHandler(struct gecko_cmd_packet* evt);
+
 /*
  * Bluetooth stack configuration
  */
@@ -261,7 +261,7 @@ enum bg_thermometer_temperature_measurement_flag{
  */
 
 static  void     App_TaskThermometer      (void *p_arg);
-static  void     BluetoothApplicationTask (void *p_arg);
+extern  void     BluetoothApplicationTask (void *p_arg);
 
 //#ifdef OTA
 //static uint8_t boot_to_dfu = 0;
@@ -489,36 +489,5 @@ void OSIdleContextHook(void)
   while (1) {
     /* Put MCU in the lowest sleep mode available, usually EM2 */
     SleepAndSyncProtimer();
-  }
-}
-
-/*********************************************************************************************************
- *                                             BluetoothApplicationTask()
- *
- * Description : Bluetooth Application task.
- *
- * Argument(s) : p_arg       the argument passed by 'OSTaskCreate()'.
- *
- * Return(s)   : none.
- *
- * Caller(s)   : This is a task.
- *
- * Note(s)     : none.
- *********************************************************************************************************
- */
-static  void  BluetoothApplicationTask(void *p_arg)
-{
-  RTOS_ERR      os_err;
-  (void)p_arg;
-
-  while (DEF_TRUE) {
-    OSFlagPend(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_WAITING,
-               0,
-               OS_OPT_PEND_BLOCKING + OS_OPT_PEND_FLAG_SET_ANY + OS_OPT_PEND_FLAG_CONSUME,
-               NULL,
-               &os_err);
-    BluetoothEventHandler((struct gecko_cmd_packet*)bluetooth_evt);
-
-    OSFlagPost(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_HANDLED, OS_OPT_POST_FLAG_SET, &os_err);
   }
 }

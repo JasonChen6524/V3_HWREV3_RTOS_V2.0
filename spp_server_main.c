@@ -33,6 +33,9 @@
 #include "global.h"
 #include "v3.h"
 #include "i2c.h"
+#include "rtos_err.h"
+#include <os.h>
+#include <rtos_bluetooth.h>
 
 /***************************************************************************************************
   Local Macros and Definitions
@@ -149,29 +152,230 @@ static void send_spp_msg()
 	}
 }
 
-void BluetoothEventHandler(struct gecko_cmd_packet* evt)
+U8 sectic = TIC_TIMER_PERSEC;
+static void BluetoothEventHandler(struct gecko_cmd_packet* evt)
 {
-  switch (BGLIB_MSG_ID(evt->header)) {
-    case gecko_evt_system_boot_id:
-    case gecko_evt_le_connection_closed_id:
-#ifdef OTA
-      if (boot_to_dfu) {
-        gecko_cmd_system_reset(2);
-      }
-#endif
-      //Start advertisement at boot, and after disconnection
-      gecko_cmd_le_gap_start_advertising(0, le_gap_general_discoverable, le_gap_connectable_scannable);
-      break;
-#ifdef OTA
-    case gecko_evt_gatt_server_user_write_request_id:
-      if (evt->data.evt_gatt_server_user_write_request.characteristic == gattdb_ota_control) {
-        //boot to dfu mode after disconnecting
-        boot_to_dfu = 1;
-        gecko_cmd_gatt_server_send_user_write_response(evt->data.evt_gatt_server_user_write_request.connection, gattdb_ota_control, bg_err_success);
-        gecko_cmd_le_connection_close(evt->data.evt_gatt_server_user_write_request.connection);
-      }
-      break;
-#endif
+	int i;
+	switch (BGLIB_MSG_ID(evt->header))
+	{
+		case gecko_evt_system_boot_id:
+		{
+			reset_variables();
+			gecko_cmd_gatt_set_max_mtu(247);
+			gecko_cmd_le_gap_start_advertising(HANDLE_V3, le_gap_general_discoverable, le_gap_undirected_connectable);
+
+			//iBeacon support
+			bcnSetupAdvBeaconing();
+		}
+		break;
+
+		/* Connection opened event */
+		case gecko_evt_le_connection_opened_id:
+		{
+			_conn_handle = evt->data.evt_le_connection_opened.connection;
+			printLog("Connected\r\n");
+			_main_state = STATE_CONNECTED;
+			v3status.spp = STATE_CONNECTED;
+
+			/* Request connection parameter update.
+			 * conn.interval min 20ms, max 40ms, slave latency 4 intervals,
+			 * supervision timeout 2 seconds
+			 * (These should be compliant with Apple Bluetooth Accessory Design Guidelines, both R7 and R8) */
+			gecko_cmd_le_connection_set_timing_parameters(_conn_handle, 24, 40, 0, 200, 0, 0xFFFF);
+		}
+		break;
+
+		case gecko_evt_le_connection_parameters_id:
+			printLog("Conn.parameters: interval %u units, txsize %u\r\n", evt->data.evt_le_connection_parameters.interval, evt->data.evt_le_connection_parameters.txsize);
+		break;
+
+		case gecko_evt_gatt_mtu_exchanged_id:
+			/* Calculate maximum data per one notification / write-without-response, this depends on the MTU.
+			 * up to ATT_MTU-3 bytes can be sent at once  */
+			_max_packet_size = evt->data.evt_gatt_mtu_exchanged.mtu - 3;
+			_min_packet_size = _max_packet_size; /* Try to send maximum length packets whenever possible */
+			printLog("MTU exchanged: %d\r\n", evt->data.evt_gatt_mtu_exchanged.mtu);
+		break;
+
+		case gecko_evt_le_connection_closed_id:
+			printLog("DISCONNECTED!\r\n");
+
+			/* Show statistics (RX/TX counters) after disconnect: */
+			printStats(&_sCounters);
+
+			reset_variables();
+
+		   /* Check if need to boot to OTA DFU mode */
+		   if (boot_to_dfu) {
+			 /* Enter to OTA DFU mode */
+			 gecko_cmd_system_reset(2);
+		   } else {
+			 /* Restart advertising after client has disconnected */
+			 gecko_cmd_le_gap_start_advertising(0, le_gap_general_discoverable, le_gap_connectable_scannable);
+			 SLEEP_SleepBlockEnd(sleepEM2); // Enable sleeping
+		   }
+
+			/* Restart advertising */
+			//gecko_cmd_le_gap_start_advertising(0, le_gap_general_discoverable, le_gap_undirected_connectable);
+		break;
+
+		  /* Check if the user-type OTA Control Characteristic was written.
+		   * If ota_control was written, boot the device into Device Firmware Upgrade (DFU) mode. */
+		case gecko_evt_gatt_server_user_write_request_id:
+
+			if (evt->data.evt_gatt_server_user_write_request.characteristic == gattdb_ota_control) {
+			  /* Set flag to enter to OTA mode */
+			  boot_to_dfu = 1;
+			  /* Send response to Write Request */
+			  gecko_cmd_gatt_server_send_user_write_response(evt->data.evt_gatt_server_user_write_request.connection, gattdb_ota_control, bg_err_success);
+
+			  /* Close connection to enter to DFU OTA mode */
+			  gecko_cmd_le_connection_close(evt->data.evt_gatt_server_user_write_request.connection);
+			}
+			break;
+
+		case gecko_evt_gatt_server_characteristic_status_id:
+		{
+		   struct gecko_msg_gatt_server_characteristic_status_evt_t *pStatus;
+		   pStatus = &(evt->data.evt_gatt_server_characteristic_status);
+
+		   if (pStatus->characteristic == gattdb_gatt_spp_data) {
+			  if (pStatus->status_flags == gatt_server_client_config) {
+				 // Characteristic client configuration (CCC) for spp_data has been changed
+				 if (pStatus->client_config_flags == gatt_notification) {
+					_main_state = STATE_SPP_MODE;
+					v3status.spp = STATE_SPP_MODE;
+					//gecko_cmd_hardware_set_soft_timer(32768, TIC_TIMER_HANDLE, 0);
+					SLEEP_SleepBlockBegin(sleepEM2); // Disable sleeping
+					//initBoard();
+					printLog("SPP Mode ON\r\n");
+				 } else {
+					printLog("SPP Mode OFF\r\n");
+					_main_state = STATE_CONNECTED;
+					v3status.spp = STATE_CONNECTED;
+					SLEEP_SleepBlockEnd(sleepEM2); // Enable sleeping
+				 }
+			  }
+		   }
+		}
+		break;
+
+		case gecko_evt_gatt_server_attribute_value_id:
+		{
+			for(i=0;i<evt->data.evt_gatt_server_attribute_value.value.len;i++) {
+				//USART_Tx(RETARGET_UART, evt->data.evt_gatt_server_attribute_value.value.data[i]);
+				v3CommBuf.rx[v3CommBuf.rxhead++]  = evt->data.evt_gatt_server_attribute_value.value.data[i];
+				if(v3CommBuf.rxhead == v3CommBuf.rxtail)
+				{
+					// make error condition for receive buffer overflow
+					break;
+				}
+			}
+			_sCounters.num_pack_received++;
+			_sCounters.num_bytes_received += evt->data.evt_gatt_server_attribute_value.value.len;
+		}
+		break;
+
+		case gecko_evt_hardware_soft_timer_id:
+
+			switch (evt->data.evt_hardware_soft_timer.handle)
+			{
+			     //case TIC_TIMER_HANDLE:  // currently once per second
+		            //v3_state(); // sequence main V3 state machine
+		         //break;
+
+		         case OS_TIMER_HANDLE:
+		         //SLEEP_SleepBlockBegin(sleepEM2); // Disable sleeping
+
+		         // Keep v3_state call before LED and feedback calls to make the response more immediate
+		         sectic++;
+
+		         if (sectic >= TIC_TIMER_PERSEC)
+		         {
+		            //v3_state(); // sequence main V3 state machine
+		            //sectic = 0;
+		         }
+
+		         ledseq();  // step the LED player
+		         fbseq(); // Step the feedback player (Haptic and buzzer)
+
+		         //Jason // For Bio-Sensor estimation -
+		         //if((v3status.spp == STATE_CONNECTED)||(v3status.spp == STATE_SPP_MODE))  bpt_main();
+		         //else  bpt_main_reset();
+
+		         //bpt_main();   // For Bio-Sensor estimation - Jason had this in the main while(1) loop.  Should go here?  Need to test
+
+		         if (v3sleep.sleepsec)
+		         {
+		        	 v3_state(); // sequence main V3 state machine
+		        	 gecko_cmd_hardware_set_soft_timer(0, OS_TIMER_HANDLE, false);  // turn off timer
+		        	 gecko_cmd_hardware_set_soft_timer((v3sleep.sleepsec*TIC_TIMER_CONST), OS_TIMER_HANDLE, false);  // set new sleep timer
+		        	 v3sleep.sleepsec = 0;  // clear flag
+		        	 sectic = TIC_TIMER_PERSEC;   // Force state machine to be called next entry
+		         }
+
+		         //SLEEP_SleepBlockEnd(sleepEM2); // Enable sleeping
+		         break;
+
+		         case OS_BIOSENSOR_HANDLE:
+		         {
+		        	 //if((v3status.spp == STATE_CONNECTED)||(v3status.spp == STATE_SPP_MODE))  bpt_main();
+		        	 //else  bpt_main_reset();
+		         }
+		         break;
+
+		         default:
+		         break;
+			}
+		   break;
+
+		default:
+		break;
+
+	}
+}
+
+/*********************************************************************************************************
+ *                                             BluetoothApplicationTask()
+ *
+ * Description : Bluetooth Application task.
+ *
+ * Argument(s) : p_arg       the argument passed by 'OSTaskCreate()'.
+ *
+ * Return(s)   : none.
+ *
+ * Caller(s)   : This is a task.
+ *
+ * Note(s)     : none.
+ *********************************************************************************************************
+ */
+void  BluetoothApplicationTask(void *p_arg)
+{
+  RTOS_ERR      os_err;
+  (void)p_arg;
+
+  U8 sectic = TIC_TIMER_PERSEC;
+
+     SLEEP_SleepBlockBegin(sleepEM2); // Disable sleeping
+
+     // Create the soft timer to process biosensor
+     //gecko_cmd_hardware_set_soft_timer(TIC_TIMER_CONST/10, OS_BIOSENSOR_HANDLE, false);              //100ms timer
+
+    //RBG OTA tesing
+    // Create soft timer to Handle init I/O and runtime I/O
+    gecko_cmd_hardware_set_soft_timer(TIC_TIMER_CONST/TIC_TIMER_PERSEC, OS_TIMER_HANDLE, false);
+
+
+  while (DEF_TRUE) {
+    OSFlagPend(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_WAITING,
+               0,
+               OS_OPT_PEND_BLOCKING + OS_OPT_PEND_FLAG_SET_ANY + OS_OPT_PEND_FLAG_CONSUME,
+               NULL,
+               &os_err);
+
+    BluetoothEventHandler((struct gecko_cmd_packet*)bluetooth_evt);
+
+    OSFlagPost(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_HANDLED, OS_OPT_POST_FLAG_SET, &os_err);
   }
 }
 

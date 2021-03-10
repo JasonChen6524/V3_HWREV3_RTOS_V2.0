@@ -652,7 +652,7 @@ v3combo.combonum = 0;
    //printLog("USART %d\r\n",sinosc[0].sample);
 #endif
 
-#if 1
+#if 0
    v3status.bio_state  = appState;
    v3status.bio_status = calibrationTimer_read();
 #endif
