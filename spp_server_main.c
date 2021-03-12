@@ -57,6 +57,29 @@
 #define TIC_TIMER_CONST 32768
 #define TIC_TIMER_PERSEC 10
 
+typedef enum {
+  DEMO_EVT_NONE                     = 0x00,
+  DEMO_EVT_BOOTED                   = 0x01,
+  DEMO_EVT_BLUETOOTH_CONNECTED      = 0x02,
+  DEMO_EVT_BLUETOOTH_DISCONNECTED   = 0x03,
+  DEMO_EVT_RAIL_READY               = 0x04,
+  DEMO_EVT_RAIL_ADVERTISE           = 0x05,
+  DEMO_EVT_LIGHT_CHANGED_BLUETOOTH  = 0x06,
+  DEMO_EVT_LIGHT_CHANGED_RAIL       = 0x07,
+  DEMO_EVT_INDICATION               = 0x08,
+  DEMO_EVT_INDICATION_SUCCESSFUL    = 0x09,
+  DEMO_EVT_INDICATION_FAILED        = 0x0A,
+  DEMO_EVT_BUTTON0_PRESSED          = 0x0B,
+  DEMO_EVT_BUTTON1_PRESSED          = 0x0C,
+  DEMO_EVT_CLEAR_DIRECTION          = 0x0D
+} I2CMsg;
+
+typedef enum {
+  PROP_STATUS_SEND                  = 0x00,
+  PROP_TIMER_EXPIRED                = 0x01,
+  PROP_TOGGLE_MODE                  = 0x02,
+  PROP_TOGGLE_RXD                   = 0x03
+} V3_Msg;
 
 enum
 {
@@ -99,6 +122,18 @@ tsCounters _sCounters;
 static uint8 _max_packet_size = 20; // Maximum bytes per one packet
 static uint8 _min_packet_size = 20; // Target minimum bytes for one packet
 static uint8 boot_to_dfu = 0;
+
+OS_MUTEX I2CMutex;
+static inline void I2CPend(RTOS_ERR* err);
+static inline void I2CPost(RTOS_ERR* err);
+
+OS_Q    I2C_Queue;
+static inline I2CMsg demoQueuePend(RTOS_ERR* err);
+static inline void I2CQueuePost(I2CMsg msg, RTOS_ERR* err);
+
+OS_Q    V3_Queue;
+static inline V3_Msg V3_QueuePend(RTOS_ERR* err);
+static inline void V3_QueuePost(V3_Msg msg, RTOS_ERR* err);
 
 static void reset_variables()
 {
@@ -152,9 +187,83 @@ static void send_spp_msg()
 	}
 }
 
-U8 sectic = TIC_TIMER_PERSEC;
+static uint16_t bpt_second_count = 0;
+void bptTimer_callback(void)
+{
+	bpt_second_count++;
+}
+
+uint16_t bptTimer_read(void)
+{
+	return bpt_second_count;
+}
+
+void bptTimer_reset(void)
+{
+	bpt_second_count = 0;
+}
+
+void bptTimer_start(void)
+{
+	gecko_cmd_hardware_set_soft_timer(TIC_TIMER_CONST, TIC_TIMER_HANDLE, false);                      //1000ms timer
+}
+
+void bptTimer_stop(void)
+{
+	gecko_cmd_hardware_set_soft_timer(0, TIC_TIMER_HANDLE, false);                                    //1000ms timer
+}
+
+void bpt_state_runCallback(void *p_tmr, void *p_arg)
+{
+  // RTOS_ERR  err;
+  /* Called when timer expires:                            */
+  /*   'p_tmr' is pointer to the user-allocated timer.     */
+  /*   'p_arg' is argument passed when creating the timer. */
+  PP_UNUSED_PARAM(p_tmr);
+  PP_UNUSED_PARAM(p_arg);
+
+  //ledseq();                          // step the LED player
+  //fbseq();                           // Step the feedback player (Haptic and buzzer)
+
+  if((v3status.spp == STATE_CONNECTED)||(v3status.spp == STATE_SPP_MODE))  bpt_main();
+  else  bpt_main_reset();
+
+}
+
+void V3_state_run(void)
+{
+	static U8 sec_tic = TIC_TIMER_PERSEC;
+    // Keep v3_state call before LED and feedback calls to make the response more immediate
+    sec_tic++;
+
+    if (sec_tic >= TIC_TIMER_PERSEC)
+    {
+       v3_state();                     // sequence main V3 state machine
+       sec_tic = 0;
+    }
+
+    ledseq();                          // step the LED player
+    fbseq();                           // Step the feedback player (Haptic and buzzer)
+
+    //Jason // For Bio-Sensor estimation -
+    //if((v3status.spp == STATE_CONNECTED)||(v3status.spp == STATE_SPP_MODE))  bpt_main();
+    //else  bpt_main_reset();
+
+    if (v3sleep.sleepsec)
+    {
+    	v3_state();                                                                                     // sequence main V3 state machine
+    	gecko_cmd_hardware_set_soft_timer(0, OS_TIMER_HANDLE, false);                                   // turn off timer
+    	gecko_cmd_hardware_set_soft_timer((v3sleep.sleepsec*TIC_TIMER_CONST), OS_TIMER_HANDLE, false);  // set new sleep timer
+    	v3sleep.sleepsec = 0;                                                                           // clear flag
+    	sec_tic = TIC_TIMER_PERSEC;                                                                     // Force state machine to be called next entry
+    }
+
+    //SLEEP_SleepBlockEnd(sleepEM2); // Enable sleeping
+}
+
 static void BluetoothEventHandler(struct gecko_cmd_packet* evt)
 {
+	//static U8 sectic = TIC_TIMER_PERSEC;
 	int i;
 	switch (BGLIB_MSG_ID(evt->header))
 	{
@@ -280,47 +389,21 @@ static void BluetoothEventHandler(struct gecko_cmd_packet* evt)
 
 			switch (evt->data.evt_hardware_soft_timer.handle)
 			{
-			     //case TIC_TIMER_HANDLE:  // currently once per second
-		            //v3_state(); // sequence main V3 state machine
-		         //break;
-
 		         case OS_TIMER_HANDLE:
-		         //SLEEP_SleepBlockBegin(sleepEM2); // Disable sleeping
-
-		         // Keep v3_state call before LED and feedback calls to make the response more immediate
-		         sectic++;
-
-		         if (sectic >= TIC_TIMER_PERSEC)
 		         {
-		            //v3_state(); // sequence main V3 state machine
-		            //sectic = 0;
+		        	 V3_state_run();
 		         }
-
-		         ledseq();  // step the LED player
-		         fbseq(); // Step the feedback player (Haptic and buzzer)
-
-		         //Jason // For Bio-Sensor estimation -
-		         //if((v3status.spp == STATE_CONNECTED)||(v3status.spp == STATE_SPP_MODE))  bpt_main();
-		         //else  bpt_main_reset();
-
-		         //bpt_main();   // For Bio-Sensor estimation - Jason had this in the main while(1) loop.  Should go here?  Need to test
-
-		         if (v3sleep.sleepsec)
-		         {
-		        	 v3_state(); // sequence main V3 state machine
-		        	 gecko_cmd_hardware_set_soft_timer(0, OS_TIMER_HANDLE, false);  // turn off timer
-		        	 gecko_cmd_hardware_set_soft_timer((v3sleep.sleepsec*TIC_TIMER_CONST), OS_TIMER_HANDLE, false);  // set new sleep timer
-		        	 v3sleep.sleepsec = 0;  // clear flag
-		        	 sectic = TIC_TIMER_PERSEC;   // Force state machine to be called next entry
-		         }
-
-		         //SLEEP_SleepBlockEnd(sleepEM2); // Enable sleeping
 		         break;
 
 		         case OS_BIOSENSOR_HANDLE:
 		         {
-		        	 //if((v3status.spp == STATE_CONNECTED)||(v3status.spp == STATE_SPP_MODE))  bpt_main();
-		        	 //else  bpt_main_reset();
+		        	 bpt_state_runCallback(NULL, NULL);
+		         }
+		         break;
+
+		         case TIC_TIMER_HANDLE:
+		         {
+		        	 bptTimer_callback();
 		         }
 		         break;
 
@@ -349,27 +432,30 @@ static void BluetoothEventHandler(struct gecko_cmd_packet* evt)
  * Note(s)     : none.
  *********************************************************************************************************
  */
+extern void bpt_stateTimer_Start(void);
 void  BluetoothApplicationTask(void *p_arg)
 {
   RTOS_ERR      os_err;
   (void)p_arg;
 
-  U8 sectic = TIC_TIMER_PERSEC;
+  //U8 sectic = TIC_TIMER_PERSEC;
 
      SLEEP_SleepBlockBegin(sleepEM2); // Disable sleeping
 
      // Create the soft timer to process biosensor
      //gecko_cmd_hardware_set_soft_timer(TIC_TIMER_CONST/10, OS_BIOSENSOR_HANDLE, false);              //100ms timer
+     bpt_stateTimer_Start();
 
     //RBG OTA tesing
     // Create soft timer to Handle init I/O and runtime I/O
     gecko_cmd_hardware_set_soft_timer(TIC_TIMER_CONST/TIC_TIMER_PERSEC, OS_TIMER_HANDLE, false);
 
-
+#if 0
   while (DEF_TRUE) {
     OSFlagPend(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_WAITING,
                0,
                OS_OPT_PEND_BLOCKING + OS_OPT_PEND_FLAG_SET_ANY + OS_OPT_PEND_FLAG_CONSUME,
+			   //OS_OPT_PEND_NON_BLOCKING + OS_OPT_PEND_FLAG_SET_ANY + OS_OPT_PEND_FLAG_CONSUME,
                NULL,
                &os_err);
 
@@ -377,6 +463,46 @@ void  BluetoothApplicationTask(void *p_arg)
 
     OSFlagPost(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_HANDLED, OS_OPT_POST_FLAG_SET, &os_err);
   }
+#else
+  while (DEF_TRUE)
+  {
+	  OS_FLAGS os_flags_ret;
+
+	  if(_main_state == STATE_SPP_MODE) {
+
+		  /* If SPP data mode is active, use non-blocking gecko_peek_event() */
+		  os_flags_ret = OSFlagPend(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_WAITING,
+	               0,
+	               OS_OPT_PEND_NON_BLOCKING + OS_OPT_PEND_FLAG_SET_ANY + OS_OPT_PEND_FLAG_CONSUME,
+	               NULL,
+	               &os_err);
+
+		  if(os_flags_ret == 0) {
+			  /* No stack events to be handled -> send data from local TX buffer */
+			  send_spp_msg(); // send V3 Message, if any from circular buffer
+			  recv_spp_msg(); // receive V3 Message, if any from circular buffer
+	         continue;  		// Jump directly to next iteration i.e. call gecko_peek_event() again
+		  }
+	  }
+	  else {
+		  //      /* if there are no events pending then the next call to gecko_wait_event() may cause
+		  //      * device go to deep sleep. Make sure that debug prints are flushed before going to sleep */
+		  //      if (!gecko_event_pending()){flushLog();}
+
+		  /* SPP data mode not active -> check for stack events using the blocking API */
+		  OSFlagPend(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_WAITING,
+	               0,
+	               OS_OPT_PEND_BLOCKING + OS_OPT_PEND_FLAG_SET_ANY + OS_OPT_PEND_FLAG_CONSUME,
+				   //OS_OPT_PEND_NON_BLOCKING + OS_OPT_PEND_FLAG_SET_ANY + OS_OPT_PEND_FLAG_CONSUME,
+	               NULL,
+	               &os_err);
+	  }
+
+	  BluetoothEventHandler((struct gecko_cmd_packet*)bluetooth_evt);
+
+	  OSFlagPost(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_HANDLED, OS_OPT_POST_FLAG_SET, &os_err);
+  }
+#endif
 }
 
 /**
@@ -708,4 +834,70 @@ void bcnSetupAdvBeaconing(void)
   /* Start advertising in user mode */
   gecko_cmd_le_gap_start_advertising(HANDLE_IBEACON, le_gap_user_data, le_gap_non_connectable);
 
+}
+
+static inline I2CMsg demoQueuePend(RTOS_ERR* err)
+{
+  I2CMsg i2cMsg;
+  OS_MSG_SIZE demoMsgSize;
+  i2cMsg = (I2CMsg)OSQPend((OS_Q*       )&I2C_Queue,
+                             (OS_TICK     ) 0,
+                             (OS_OPT      ) OS_OPT_PEND_BLOCKING,
+                             (OS_MSG_SIZE*)&demoMsgSize,
+                             (CPU_TS*     ) DEF_NULL,
+                             (RTOS_ERR*   ) err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
+  return i2cMsg;
+}
+
+static inline void I2CQueuePost(I2CMsg msg, RTOS_ERR* err)
+{
+  OSQPost((OS_Q*      )&I2C_Queue,
+          (void*      ) msg,
+          (OS_MSG_SIZE) sizeof(void*),
+          (OS_OPT     ) OS_OPT_POST_FIFO + OS_OPT_POST_ALL,
+          (RTOS_ERR*  ) err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
+}
+
+static inline V3_Msg V3_QueuePend(RTOS_ERR* err)
+{
+  V3_Msg v3Msg;
+  OS_MSG_SIZE propMsgSize;
+  v3Msg = (V3_Msg)OSQPend((OS_Q*       )&V3_Queue,
+                             (OS_TICK     ) 0,
+                             (OS_OPT      ) OS_OPT_PEND_NON_BLOCKING,                               // OS_OPT_PEND_BLOCKING
+                             (OS_MSG_SIZE*)&propMsgSize,
+                             (CPU_TS     *) DEF_NULL,
+                             (RTOS_ERR   *) err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
+  return v3Msg;
+}
+
+static inline void V3_QueuePost(V3_Msg msg, RTOS_ERR* err)
+{
+  OSQPost((OS_Q*      )&V3_Queue,
+          (void*      ) msg,
+          (OS_MSG_SIZE) sizeof(void*),
+          (OS_OPT     ) OS_OPT_POST_FIFO + OS_OPT_POST_ALL,
+          (RTOS_ERR*  ) err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
+}
+
+static inline void I2CPend(RTOS_ERR* err)
+{
+  OSMutexPend((OS_MUTEX *)&I2CMutex,
+              (OS_TICK   ) 0,
+              (OS_OPT    ) OS_OPT_PEND_NON_BLOCKING,                                                //OS_OPT_PEND_BLOCKING,
+              (CPU_TS   *) DEF_NULL,
+              (RTOS_ERR *) err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
+}
+
+static inline void I2CPost(RTOS_ERR* err)
+{
+  OSMutexPost((OS_MUTEX *)&I2CMutex,
+              (OS_OPT    ) OS_OPT_POST_NONE,
+              (RTOS_ERR *) err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
 }

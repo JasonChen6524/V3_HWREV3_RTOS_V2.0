@@ -314,7 +314,7 @@
  *********************************************************************************************************
  */
 
-#define  OS_CFG_TMR_EN                                      DEF_DISABLED
+#define  OS_CFG_TMR_EN                                      DEF_ENABLED                                                 //DEF_DISABLED, Changed by Jason
 
 #define  OS_CFG_TMR_DEL_EN                                  DEF_DISABLED
 

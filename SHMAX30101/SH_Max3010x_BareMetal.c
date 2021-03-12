@@ -165,7 +165,7 @@ static void bpt_data_rx(uint8_t* data_ptr) {
 	sample.bpt_rpt    = data_ptr[14];
 	sample.spo2_rpt   = data_ptr[15];
 	sample.end_bpt    = data_ptr[16];
-#if 1
+#if 0
 	uint16_t spo21 = sample.spo2/10;
 	uint16_t spo22 = sample.spo2 - spo21 * 10;
 	if(appState  == ST_EXAMPLEUSER_ESTIMATION_MEASUREMENT)
@@ -324,6 +324,208 @@ void SH_Max3010x_data_report_execute(void) {
 	}
 }
 
+static uint8_t read_state = 0;
+static int num_samples = 0;
+static int num_samplesLeft = 0;
+static int databufLen;
+static uint8_t *databuf;
+static Max30101_SH_Status_Tracker_t *p_glbl_max3010x_status_track;
+#define READ_SAMPLES_LIMIT  8
+void SH_Max3010x_data_report_execute02(void)
+{
+	static int status = -1;
+
+	switch(read_state)
+	{
+	   case 0:
+	   {
+		   if(m_irq_received == false)
+		   {
+			   num_samples = 0;
+			   return;
+		   }
+		   p_glbl_max3010x_status_track = get_config_struct();
+
+		   // prepare the buffer to store the results
+		   databuf = p_glbl_max3010x_status_track->data_buf_storage;
+		   databufLen = sizeof(p_glbl_max3010x_status_track->data_buf_storage);
+
+		   sh_disable_irq_mfioevent();
+		   sh_clear_mfio_event_flag();
+
+		   uint8_t hubStatus = 0;
+		   status = sh_get_sensorhub_status(&hubStatus);
+		   if(status != 0x00 /*SS_SUCCESS*/){
+			   num_samples = 0;
+			   sh_enable_irq_mfioevent();
+			   return;
+		   }
+
+		   if (!(hubStatus & SS_MASK_STATUS_DATA_RDY))
+		   {
+			   sh_enable_irq_mfioevent();
+			   return;
+		   }
+
+		   status = sh_num_avail_samples(&num_samples);
+		   if (status != 0x00 /*SS_SUCCESS*/){
+			   num_samples = 0;
+			   sh_enable_irq_mfioevent();
+			   read_state = 0;
+			   return;
+		   }
+
+		   int sample_size;
+		   fifo_sample_size(data_type, &sample_size);
+			   /*DEBUG *///
+		   int bytes_to_read = num_samples * sample_size + 1; //+1 for status byte
+		   if ( bytes_to_read > databufLen) {
+			   //Reduce number of samples to read to fit in buffer
+			   num_samples = (databufLen - 1) / sample_size;
+		   }
+
+		   if(num_samples > READ_SAMPLES_LIMIT)
+		   {
+			   num_samplesLeft = num_samples - READ_SAMPLES_LIMIT;
+			   num_samples = READ_SAMPLES_LIMIT;
+		   }
+		   else
+			   num_samplesLeft = 0;
+
+		   //wait_ms(5);
+		   status = sh_read_fifo_data(num_samples, sample_size, &databuf[0], databufLen);
+		   if(status != 0x00 /*SS_SUCCESS*/){
+			   num_samples = 0;
+			   sh_enable_irq_mfioevent();
+			   read_state = 0;
+			   return;
+		   }
+		   sh_enable_irq_mfioevent();
+
+		   if(num_samples)
+		   {
+			   //Skip status byte
+			   uint8_t *data_ptr = &databuf[1];
+
+			   int i = 0;
+			   for (i = 0; i < num_samples; i++) {
+				   int sh_data_type = p_glbl_max3010x_status_track->data_type_enabled;
+				   if (p_glbl_max3010x_status_track->sample_count_enabled) {
+					   p_glbl_max3010x_status_track->sample_count = *data_ptr++;
+				   }
+				   //Chop up data and send to modules with enabled sensors
+				   if (sh_data_type == SS_DATATYPE_RAW || sh_data_type == SS_DATATYPE_BOTH) {
+					   for (int i = 0; i < SH_NUM_CURRENT_SENSORS; i++) {
+						   if (p_glbl_max3010x_status_track->sensor_enabled_mode[i]) {
+							   p_glbl_max3010x_status_track->sensor_callbacks[i].rx_data_parser(data_ptr);
+							   data_ptr += p_glbl_max3010x_status_track->sensor_callbacks[i].data_size;
+						   }
+					   }
+				   }
+				   if (sh_data_type == SS_DATATYPE_ALGO || sh_data_type == SS_DATATYPE_BOTH) {
+					   for (int i = 0; i < SH_NUM_CURRENT_ALGOS; i++) {
+						   if (p_glbl_max3010x_status_track->algo_enabled_mode[i]) {
+							   p_glbl_max3010x_status_track->algo_callbacks[i].rx_data_parser(data_ptr);
+							   data_ptr += p_glbl_max3010x_status_track->algo_callbacks[i].data_size;
+						   }
+					   }
+				   }
+			   }
+		   }
+		   if(num_samplesLeft)
+		   {
+			   num_samples = num_samplesLeft;
+			   read_state = 1;
+			   break;
+		   }
+		   else
+		   {
+			   read_state = 0;
+			   break;
+		   }
+	   }
+	   break;
+
+	   case 1:
+	   {
+		   int sample_size;
+		   fifo_sample_size(data_type, &sample_size);
+			   /*DEBUG *///
+		   int bytes_to_read = num_samples * sample_size + 1; //+1 for status byte
+		   if ( bytes_to_read > databufLen) {
+			   //Reduce number of samples to read to fit in buffer
+			   num_samples = (databufLen - 1) / sample_size;
+		   }
+
+		   if(num_samples > READ_SAMPLES_LIMIT)
+		   {
+			   num_samplesLeft = num_samples - READ_SAMPLES_LIMIT;
+			   num_samples = READ_SAMPLES_LIMIT;
+		   }
+		   else
+			   num_samplesLeft = 0;
+
+		   //wait_ms(5);
+		   status = sh_read_fifo_data(num_samples, sample_size, &databuf[0], databufLen);
+		   if(status != 0x00 /*SS_SUCCESS*/){
+			   num_samples = 0;
+			   sh_enable_irq_mfioevent();
+			   read_state = 0;
+			   return;
+		   }
+		   sh_enable_irq_mfioevent();
+
+		   if(num_samples)
+		   {
+			   //Skip status byte
+			   uint8_t *data_ptr = &databuf[1];
+
+			   int i = 0;
+			   for (i = 0; i < num_samples; i++) {
+				   int sh_data_type = p_glbl_max3010x_status_track->data_type_enabled;
+				   if (p_glbl_max3010x_status_track->sample_count_enabled) {
+					   p_glbl_max3010x_status_track->sample_count = *data_ptr++;
+				   }
+				   //Chop up data and send to modules with enabled sensors
+				   if (sh_data_type == SS_DATATYPE_RAW || sh_data_type == SS_DATATYPE_BOTH) {
+					   for (int i = 0; i < SH_NUM_CURRENT_SENSORS; i++) {
+						   if (p_glbl_max3010x_status_track->sensor_enabled_mode[i]) {
+							   p_glbl_max3010x_status_track->sensor_callbacks[i].rx_data_parser(data_ptr);
+							   data_ptr += p_glbl_max3010x_status_track->sensor_callbacks[i].data_size;
+						   }
+					   }
+				   }
+				   if (sh_data_type == SS_DATATYPE_ALGO || sh_data_type == SS_DATATYPE_BOTH) {
+					   for (int i = 0; i < SH_NUM_CURRENT_ALGOS; i++) {
+						   if (p_glbl_max3010x_status_track->algo_enabled_mode[i]) {
+							   p_glbl_max3010x_status_track->algo_callbacks[i].rx_data_parser(data_ptr);
+							   data_ptr += p_glbl_max3010x_status_track->algo_callbacks[i].data_size;
+						   }
+					   }
+				   }
+			   }
+		   }
+		   if(num_samplesLeft)
+		   {
+			   num_samples = num_samplesLeft;
+			   break;
+		   }
+		   else
+		   {
+			   read_state = 0;
+			   break;
+		   }
+	   }
+	   break;
+
+	   default:
+	   {
+		   read_state = 0;
+	   }
+	   break;
+	}
+}
+
 /*CALIB: 1 , 0*/
 /*ESTIM: 2 , 1*/
 int SH_Max3010x_default_init( const int algoExecutionMode, const int agc_usage ) {
@@ -381,7 +583,7 @@ int SH_Max3010x_default_init( const int algoExecutionMode, const int agc_usage )
 				p_glbl_max3010x_status_track->algo_enabled_mode[SH_ALGOIDX_AGC] = 0x00;
 		}
 	}
-
+#if 0
 	/* Disable IRQ based Event reporting from Sensor Hub ME11*/
 	sh_disable_irq_mfioevent();
 
@@ -406,7 +608,7 @@ int SH_Max3010x_default_init( const int algoExecutionMode, const int agc_usage )
 
 	/* Enable IRQ based Event reporting from Sensor Hub ME11*/
 	sh_enable_irq_mfioevent();
-
+#endif
 	if(algoExecutionMode == bptExecModeCalibration)
 	{
 		printLog("\r\nCalication Init err = %d\r\n",  status);
@@ -419,8 +621,136 @@ int SH_Max3010x_default_init( const int algoExecutionMode, const int agc_usage )
 
 }
 
+int SH_Max3010x_algo_start( const int algoExecutionMode)                  // Added by Jason Chen
+{
+	int status;
 
+	Max30101_SH_Status_Tracker_t *p_glbl_max3010x_status_track = get_config_struct();
+	/* Disable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_disable_irq_mfioevent();
 
+    status = sh_sensor_enable(SH_SENSORIDX_MAX30101, SSMAX30101_MODE1_DATASIZE, SH_INPUT_DATA_DIRECT_SENSOR);
+    if (status != SS_SUCCESS) {
+    	printLog("\r\n err=%d\r\n",  COMM_GENERAL_ERROR);
+    	printLog("FAILED at max3010x sensor init line %d\n", __LINE__);
+    	sh_enable_irq_mfioevent();
+    	return COMM_GENERAL_ERROR;
+    }
+
+    p_glbl_max3010x_status_track->sensor_enabled_mode[SH_SENSORIDX_MAX30101] = 0x01;
+
+    // DEBUG: Check this function again!
+    status = sh_enable_algo_withmode(SH_ALGOIDX_BPT, algoExecutionMode ,SSBPT_MODE1_2_DATASIZE);
+    if (status != SS_SUCCESS) {
+    	printLog("\r\n err=%d\r\n",  COMM_GENERAL_ERROR);
+    	printLog("FAILED at bpt algo init line %d\n", __LINE__);
+    	sh_enable_irq_mfioevent();
+    	return COMM_GENERAL_ERROR;
+    }
+    p_glbl_max3010x_status_track->algo_enabled_mode[SH_ALGOIDX_BPT] = 0x01;
+
+    /* Enable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_enable_irq_mfioevent();
+
+    return COMM_SUCCESS;
+}
+
+int SH_Max3010x_sensor_enable(void)                                                     // Added by Jason Chen,2021.03.04
+{
+	int status;
+
+	//Max30101_SH_Status_Tracker_t *p_glbl_max3010x_status_track = get_config_struct();
+	/* Disable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_disable_irq_mfioevent();
+
+    status = sh_sensor_enable02(SH_SENSORIDX_MAX30101, SSMAX30101_MODE1_DATASIZE, SH_INPUT_DATA_DIRECT_SENSOR);
+    if (status != SS_SUCCESS) {
+    	sh_enable_irq_mfioevent();
+    	return COMM_GENERAL_ERROR;
+    }
+#if 0
+    wait_ms(1 * 40);
+
+    status = sh_sensor_enable02_status(SH_SENSORIDX_MAX30101, SSMAX30101_MODE1_DATASIZE, SH_INPUT_DATA_DIRECT_SENSOR);
+    if (status != SS_SUCCESS) {
+    	sh_enable_irq_mfioevent();
+    	return COMM_GENERAL_ERROR;
+    }
+
+    p_glbl_max3010x_status_track->sensor_enabled_mode[SH_SENSORIDX_MAX30101] = 0x01;
+#endif
+    /* Enable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_enable_irq_mfioevent();
+
+    return COMM_SUCCESS;
+}
+
+int SH_Max3010x_sensor_enable_status(void)                                           // Added by Jason Chen,2021.03.04
+{
+	int status;
+
+	Max30101_SH_Status_Tracker_t *p_glbl_max3010x_status_track = get_config_struct();
+	/* Disable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_disable_irq_mfioevent();
+
+    status = sh_sensor_enable02_status(SH_SENSORIDX_MAX30101, SSMAX30101_MODE1_DATASIZE, SH_INPUT_DATA_DIRECT_SENSOR);
+    if (status != SS_SUCCESS) {
+    	sh_enable_irq_mfioevent();
+    	return COMM_GENERAL_ERROR;
+    }
+
+    p_glbl_max3010x_status_track->sensor_enabled_mode[SH_SENSORIDX_MAX30101] = 0x01;
+    /* Enable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_enable_irq_mfioevent();
+
+    return COMM_SUCCESS;
+}
+
+int SH_Max3010x_algo_start_02( const int algoExecutionMode)                  // Added by Jason Chen, 2021.03.04
+{
+	int status;
+
+	Max30101_SH_Status_Tracker_t *p_glbl_max3010x_status_track = get_config_struct();
+	/* Disable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_disable_irq_mfioevent();
+
+    // DEBUG: Check this function again!
+    status = sh_enable_algo_withmode02(SH_ALGOIDX_BPT, algoExecutionMode ,SSBPT_MODE1_2_DATASIZE);
+    if (status != SS_SUCCESS) {
+    	printLog("\r\n err=%d\r\n",  COMM_GENERAL_ERROR);
+    	printLog("FAILED at bpt algo init line %d\n", __LINE__);
+    	sh_enable_irq_mfioevent();
+    	return COMM_GENERAL_ERROR;
+    }
+
+    p_glbl_max3010x_status_track->algo_enabled_mode[SH_ALGOIDX_BPT] = 0x01;
+
+    /* Enable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_enable_irq_mfioevent();
+
+    return COMM_SUCCESS;
+}
+
+int SH_Max3010x_algo_start_02_status( const int algoExecutionMode)                  // Added by Jason Chen, 2021.03.04
+{
+	int status;
+
+	/* Disable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_disable_irq_mfioevent();
+
+    status = sh_enable_algo_withmode_status02(SH_ALGOIDX_BPT, algoExecutionMode ,SSBPT_MODE1_2_DATASIZE);
+    if (status != SS_SUCCESS) {
+    	printLog("\r\n err=%d\r\n",  COMM_GENERAL_ERROR);
+    	printLog("FAILED at bpt algo init line %d\n", __LINE__);
+    	sh_enable_irq_mfioevent();
+    	return COMM_GENERAL_ERROR;
+    }
+
+    /* Enable IRQ based Event reporting from Sensor Hub ME11*/
+    sh_enable_irq_mfioevent();
+
+    return COMM_SUCCESS;
+}
 
 /* COMMAND TABLE FUNCTIONS*/
 int SH_Max3010x_get_bpt_dataformat(const char *null_arg){

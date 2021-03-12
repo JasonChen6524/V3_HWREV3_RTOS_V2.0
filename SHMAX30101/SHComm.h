@@ -289,6 +289,12 @@ typedef enum {
 	ST_EXAMPLEUSER_ESTIMATION_STARTING,
 	ST_EXAMPLEUSER_ESTIMATION_MEASUREMENT,
 	ST_EXAMPLEUSER_ESTIMATION_RE_MEASUREMENT,
+	ST_EXAMPLEUSER_ESTIMATION_RE_STARTING,                        // Added by Jason, 2021.03.02
+	ST_EXAMPLEUSER_CALIBRATION_STARTING,                          // Added by Jason, 2021.03.02
+	ST_EXAMPLEUSER_ESTIMATION_SENSOR_ENABLE,                      // Added by Jason, 2021.03.04
+	ST_EXAMPLEUSER_ESTIMATION_SENSOR_ENABLE_STATUS,               // Added by Jason, 2021.03.04
+	ST_EXAMPLEUSER_ESTIMATION_RE_STARTING02,                      // Added by Jason, 2021.03.04
+	ST_EXAMPLEUSER_ESTIMATION_RE_STARTING03,                      // Added by Jason, 2021.03.04
 	ST_EXAMPLEUSER_TIMEOUT,
 	ST_EXAMPLEUSER_FAILURE,
 	ST_EXAMPLEUSER_DELAY_COUNT                                    // Jason
@@ -521,6 +527,8 @@ int sh_get_reg(int idx, uint8_t addr, uint32_t *val);
  * @return	1 byte status (SS_STATUS) : 0x00 (SS_SUCCESS) on success
  */
 int sh_sensor_enable( int idx , int sensorSampleSz , uint8_t ext_mode );
+int sh_sensor_enable02( int idx , int sensorSampleSz , uint8_t ext_mode );
+int sh_sensor_enable02_status( int idx , int sensorSampleSz , uint8_t ext_mode );
 
 
 /**
@@ -589,6 +597,8 @@ int sh_enable_algo(int idx , int algoSampleSz);
  *
  * */
 int sh_enable_algo_withmode(int idx, int mode, int algoSampleSz);
+int sh_enable_algo_withmode02(int idx, int mode, int algoSampleSz);
+int sh_enable_algo_withmode_status02(int idx, int mode, int algoSampleSz);
 
 /**
  * @brief	func to disable an algorithm on the SmartSensor
@@ -875,6 +885,11 @@ extern uint8_t sh_write_buf[];
 
 extern void wait_ms(uint16_t ms_value);
 extern uint16_t calibrationTimer_read(void);
+extern uint16_t bptTimer_read(void);
+
+extern volatile bool m_irq_received;                             //Added by Jason Chen2021.03.05
+extern int data_type;                                            //Added by Jason Chen2021.03.05
+void fifo_sample_size(int data_type_, int *sample_size);         //Added by Jason Chen2021.03.05
 
 /*
 #ifdef __cplusplus

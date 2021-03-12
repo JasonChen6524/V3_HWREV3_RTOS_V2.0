@@ -50,7 +50,7 @@
 
 #define SS_DUMP_REG_SLEEP_MS        (100)
 #define SS_ENABLE_SENSOR_SLEEP_MS   (40)
-#define SS_ENABLE_ALGO_SLEEP_MS     (500)
+#define SS_ENABLE_ALGO_SLEEP_MS     (100)                                    // 500 ---> 50, 2021.03.02
 #define SS_DEFAULT_CMD_SLEEP_MS     (2)
 #define SS_WAIT_BETWEEN_TRIES_MS    (2)
 #define SS_CMD_WAIT_PULLTRANS_MS    (5)
@@ -150,13 +150,13 @@
  * **/
 
 /*global buffer for sensor i2c commands+data*/
-uint8_t sh_write_buf[512 + 128];                                               // Buffer size changed from 512 to (512 + 128), 2021.02.25
-static volatile bool m_irq_received    = false;
+uint8_t sh_write_buf[512 + 32];                                               // Buffer size changed from 512 to (512 + 128), 2021.02.25
+/*static*/ volatile bool m_irq_received    = false;
 static volatile bool mfio_int_happened = false;
 
 /* sensor hub states */
 static bool sc_en     = false;
-static int data_type  = 0;
+/*static*/ int data_type  = 0;
 static int is_sensor_enabled[SS_MAX_SUPPORTED_SENSOR_NUM] = {0};
 static int is_algo_enabled[SS_MAX_SUPPORTED_ALGO_NUM]     = {0};
 static int enabled_algo_mode[SS_MAX_SUPPORTED_ALGO_NUM]   = {0};
@@ -744,7 +744,6 @@ int sh_write_cmd( uint8_t *tx_buf,
     if(ret != 0)
        return SS_ERR_UNAVAILABLE;
 
-
     wait_ms(sleep_ms);
 
     char status_byte;
@@ -757,15 +756,11 @@ int sh_write_cmd( uint8_t *tx_buf,
 		try_again = (status_byte == SS_ERR_TRY_AGAIN);
 	}
 
-#if 1
     if(ret != 0 || try_again)
+    {
         return SS_ERR_UNAVAILABLE;
-#else
-    if(ret != 0)
-    	return SS_ERR_UNAVAILABLE;
-    else if (try_again)
-    	return SS_ERR_UNAVAILABLE;
-#endif
+    }
+
 	return (int) (SS_STATUS)status_byte;
 }
 
@@ -1100,7 +1095,7 @@ int sh_get_reg(int idx, uint8_t addr, uint32_t *val){
 int sh_sensor_enable( int idx , int sensorSampleSz , uint8_t ext_mode ){
 
 	uint8_t ByteSeq[] = SH_ENABLE_SENSOR_CMDSEQ( ((uint8_t) idx) ,  ((uint8_t) ext_mode));
-	int status = sh_write_cmd( &ByteSeq[0],sizeof(ByteSeq), 5 * SS_ENABLE_SENSOR_SLEEP_MS);
+	int status = sh_write_cmd( &ByteSeq[0],sizeof(ByteSeq), 1 * SS_ENABLE_SENSOR_SLEEP_MS);                      // 5  ----> 1, 2021.03.02
 	if(status == 0x00){
 
 		is_sensor_enabled[idx] = ENABLED;
@@ -1110,6 +1105,76 @@ int sh_sensor_enable( int idx , int sensorSampleSz , uint8_t ext_mode ){
 
 }
 
+int sh_sensor_enable02( int idx , int sensorSampleSz , uint8_t ext_mode ){
+
+	uint8_t ByteSeq[] = SH_ENABLE_SENSOR_CMDSEQ( ((uint8_t) idx) ,  ((uint8_t) ext_mode));
+	int retries = SS_DEFAULT_RETRIES;
+	int tx_len = sizeof(ByteSeq);
+	int ret = m_i2cBus_write(SS_I2C_8BIT_SLAVE_ADDR, (U8*)ByteSeq, tx_len, false);
+	while (ret != 0 && retries-- > 0) {
+
+		wait_ms(1);
+    	ret = m_i2cBus_write(SS_I2C_8BIT_SLAVE_ADDR, (U8*)ByteSeq, tx_len, false);
+	}
+    if(ret != 0)
+       return SS_ERR_UNAVAILABLE;
+    return 0x00;
+#if 0
+    wait_ms(1 * SS_ENABLE_SENSOR_SLEEP_MS);                                                                       // 5  ----> 1, 2021.03.04
+
+    char status_byte;
+    ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+	bool try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	while ((ret != 0 || try_again) && retries-- > 0)
+	{
+	 	wait_ms(1 * SS_ENABLE_SENSOR_SLEEP_MS);                                                                   // 5  ----> 1, 2021.03.04
+    	ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+		try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	}
+
+    if(ret != 0 || try_again)
+    {
+        return SS_ERR_UNAVAILABLE;
+    }
+
+	if(status_byte == 0x00){
+
+		is_sensor_enabled[idx] = ENABLED;
+		sensor_sample_sz[idx] = sensorSampleSz;
+	}
+    return status_byte;
+#endif
+}
+
+int sh_sensor_enable02_status( int idx , int sensorSampleSz , uint8_t ext_mode ){
+
+	//uint8_t ByteSeq[] = SH_ENABLE_SENSOR_CMDSEQ( ((uint8_t) idx) ,  ((uint8_t) ext_mode));
+	int retries = SS_DEFAULT_RETRIES;
+	//int tx_len = sizeof(ByteSeq);
+	int ret = -1;
+
+    char status_byte;
+    ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+	bool try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	while ((ret != 0 || try_again) && retries-- > 0)
+	{
+	 	wait_ms(1 * SS_ENABLE_SENSOR_SLEEP_MS);                                                                   // 5  ----> 1, 2021.03.04
+    	ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+		try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	}
+
+    if(ret != 0 || try_again)
+    {
+        return SS_ERR_UNAVAILABLE;
+    }
+
+	if(status_byte == 0x00){
+
+		is_sensor_enabled[idx] = ENABLED;
+		sensor_sample_sz[idx] = sensorSampleSz;
+	}
+    return status_byte;
+}
 
 int sh_sensor_disable( int idx ){
 
@@ -1217,6 +1282,92 @@ int sh_enable_algo_withmode(int idx, int mode, int algoSampleSz)
 }
 
 
+int sh_write_cmd_with_data02(uint8_t *cmd_bytes,
+		                   int cmd_bytes_len,
+                           uint8_t *data,
+						   int data_len,
+                           int cmd_delay_ms)
+{
+    memcpy(sh_write_buf, cmd_bytes, cmd_bytes_len);
+    memcpy(sh_write_buf + cmd_bytes_len, data, data_len);
+
+	int retries = SS_DEFAULT_RETRIES;
+	int ret = m_i2cBus_write(SS_I2C_8BIT_SLAVE_ADDR, (U8*)sh_write_buf, cmd_bytes_len + data_len, false);
+	while (ret != 0 && retries-- > 0) {
+
+		wait_ms(1);
+    	ret = m_i2cBus_write(SS_I2C_8BIT_SLAVE_ADDR, (U8*)sh_write_buf, cmd_bytes_len + data_len, false);
+	}
+    if(ret != 0)
+       return SS_ERR_UNAVAILABLE;
+
+    wait_ms(cmd_delay_ms);
+
+    char status_byte;
+    ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+	bool try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	while ((ret != 0 || try_again) && retries-- > 0)
+	{
+	 	wait_ms(cmd_delay_ms);
+    	ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+		try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	}
+
+    if(ret != 0 || try_again)
+    {
+        return SS_ERR_UNAVAILABLE;
+    }
+
+	return (int) (SS_STATUS)status_byte;
+}
+
+
+int sh_enable_algo_withmode02(int idx, int mode, int algoSampleSz)
+{
+
+	uint8_t cmd_bytes[] = { SS_FAM_W_ALGOMODE, (uint8_t)idx, (uint8_t)mode };
+
+	int cmd_bytes_len = sizeof(cmd_bytes);
+    memcpy(sh_write_buf, cmd_bytes, cmd_bytes_len);
+  //memcpy(sh_write_buf + cmd_bytes_len, data, data_len);
+
+	int retries = SS_DEFAULT_RETRIES;
+	int ret = m_i2cBus_write(SS_I2C_8BIT_SLAVE_ADDR, (U8*)sh_write_buf, cmd_bytes_len + 0, false);
+	while (ret != 0 && retries-- > 0) {
+
+		wait_ms(1);
+    	ret = m_i2cBus_write(SS_I2C_8BIT_SLAVE_ADDR, (U8*)sh_write_buf, cmd_bytes_len + 0, false);
+	}
+    if(ret != 0)
+       return SS_ERR_UNAVAILABLE;
+
+    return (int) (SS_STATUS)ret;
+}
+
+int sh_enable_algo_withmode_status02(int idx, int mode, int algoSampleSz)
+{
+    char status_byte;
+    int retries = SS_DEFAULT_RETRIES;
+    int ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+	bool try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	while ((ret != 0 || try_again) && retries-- > 0)
+	{
+	 	wait_ms(SS_ENABLE_ALGO_SLEEP_MS);
+    	ret = m_i2cBus_read(SS_I2C_8BIT_SLAVE_ADDR, (U8*)&status_byte, 1);
+		try_again = (status_byte == SS_ERR_TRY_AGAIN);
+	}
+
+    if(ret != 0 || try_again)
+    {
+        return SS_ERR_UNAVAILABLE;
+    }
+	if (status_byte == SS_SUCCESS) {
+		is_algo_enabled[idx]   = ENABLED;
+		algo_sample_sz[idx]    = algoSampleSz;
+		enabled_algo_mode[idx] = mode;
+	}
+	return (int) (SS_STATUS)status_byte;
+}
 
 int sh_disable_algo(int idx){
 
@@ -1299,7 +1450,7 @@ int sh_get_algo_cfg_extendedwait(int algo_idx, int cfg_idx, uint8_t *cfg, int cf
  *        N/A
  *
  **/
-static void fifo_sample_size(int data_type_, int *sample_size)
+/*static*/ void fifo_sample_size(int data_type_, int *sample_size)
 {
 
     int tmpSz = 0;

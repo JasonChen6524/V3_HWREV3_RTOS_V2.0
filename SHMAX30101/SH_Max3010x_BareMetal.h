@@ -77,9 +77,11 @@ enum bptExecMode{
 * @return SS_STATUS byte
 */
 int SH_Max3010x_default_init( const int algoExecutionMode, const int agc_usage );
-
-
-
+int SH_Max3010x_algo_start( const int algoExecutionMode);                                     // Added by Jason Chen
+int SH_Max3010x_algo_start_02( const int algoExecutionMode);                                  // Added by Jason Chen, 2021.03.04
+int SH_Max3010x_algo_start_02_status( const int algoExecutionMode);                           // Added by Jason Chen, 2021.03.04
+int SH_Max3010x_sensor_enable( void );                                                        // Added by Jason Chen, 2021.03.04
+int SH_Max3010x_sensor_enable_status( void );                                                 // Added by Jason Chen, 2021.03.04
 
 typedef int (*cmdExecFunc)( const char*); // typedef void (*cmdExecFunc)( const void*);
 
@@ -309,7 +311,7 @@ int SH_Max3010x_stop(const char *null_arg);
 *
 */
 void SH_Max3010x_data_report_execute(void);
-
+void SH_Max3010x_data_report_execute02(void);
 
 //FOR MAIN DEMO USAGE THIS WILL BE REPLACED!!
 int ssx_set_algo_cfg(int algo_idx, int cfg_idx, uint8_t *cfg, int cfg_sz);

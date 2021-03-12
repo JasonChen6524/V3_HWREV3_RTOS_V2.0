@@ -65,6 +65,7 @@
  *********************************************************************************************************
  */
 
+
 #define OTA
 
 #define  EX_MAIN_START_TASK_PRIO            21u
@@ -239,6 +240,12 @@ static CPU_STK ApplicationTaskStk[APPLICATION_STACK_SIZE];
 static  CPU_STK  TimerTaskStk[TIMER_TASK_STK_SIZE];
 #endif
 
+static OS_TMR bpt_stateTimer;
+
+extern OS_MUTEX I2CMutex;
+extern OS_Q    I2C_Queue;
+extern OS_Q    V3_Queue;
+
 // ISR Stack
 static  CPU_STK  ISRStk[ISR_STK_SIZE];
 
@@ -409,10 +416,26 @@ static errorcode_t initialize_bluetooth()
  * Notes       : None.
  *********************************************************************************************************
  */
+void bpt_stateTimer_Start(void)
+{
+	RTOS_ERR  err;
+	OSTmrStart(&bpt_stateTimer, &err);
+	APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+}
+
+void bpt_stateTimer_Stop(void)
+{
+	RTOS_ERR  err;
+	OSTmrStop(&bpt_stateTimer, OS_OPT_TMR_NONE, DEF_NULL, &err);
+	APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+}
+
+extern void bpt_state_runCallback(void *p_tmr, void *p_arg);
+//extern void V3_state_run(void);
 static  void  App_TaskThermometer(void *p_arg)
 {
   RTOS_ERR  err;
-  int temperature_counter = 60;                                 /* A temperature value counting up */
+  //int temperature_counter = 60;                                 /* A temperature value counting up */
   CORE_DECLARE_IRQ_STATE;
 
   PP_UNUSED_PARAM(p_arg);                                       /* Prevent compiler warning.                            */
@@ -433,6 +456,35 @@ static  void  App_TaskThermometer(void *p_arg)
   BSP_OS_Init();                                                /* Initialize the BSP. It is expected that the BSP ...  */
                                                                 /* ... will register all the hardware controller to ... */
                                                                 /* ... the platform manager at this moment.             */
+#if 0
+  OSMutexCreate(&I2CMutex,
+                "Light Mutex",
+                &err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+
+  OSQCreate((OS_Q     *)&I2C_Queue,
+            (CPU_CHAR *)"Proprietary Queue",
+            (OS_MSG_QTY) 32,
+            (RTOS_ERR *)&err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+
+  OSQCreate((OS_Q     *)&V3_Queue,
+            (CPU_CHAR *)"Demo Queue",
+            (OS_MSG_QTY) 32,
+            (RTOS_ERR *)&err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+#endif
+
+
+  OSTmrCreate(&bpt_stateTimer,         /* Pointer to user-allocated timer. */
+              "Proprietary Timer",       /* Name used for debugging.         */
+              0,                         /* 0 initial delay.                 */
+              10,                        /* 100 Timer Ticks period.          */
+              OS_OPT_TMR_PERIODIC,       /* Timer is periodic.               */
+              &bpt_state_runCallback, /* Called when timer expires.       */
+              DEF_NULL,                  /* No arguments to callback.        */
+              &err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 
   // Create task for Event handler
   OSTaskCreate((OS_TCB     *)&ApplicationTaskTCB,
@@ -451,28 +503,30 @@ static  void  App_TaskThermometer(void *p_arg)
   APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 
   // Start the Thermometer Loop. This call does NOT return.
+#if 0
   while (DEF_TRUE)
   {
     OSTimeDlyHMSM(0, 0, 0, 100,
                   OS_OPT_TIME_DLY | OS_OPT_TIME_HMSM_NON_STRICT,
                   &err);
-    // Increasing the temperature value sent
     temperature_counter--;
-    // Make the value move between 20 and 40
     if (temperature_counter < 0) {
       temperature_counter = 59;
     }
 
-    uint8_t temp_buffer[16];
-    bg_thermometer_create_measurement(temp_buffer, bg_uint32_to_float(temperature_counter, 0),
-                                      0);
-    gecko_cmd_gatt_server_send_characteristic_notification(0xff, gattdb_gatt_spp_data, 16, temp_buffer);
+    //bpt_state_run();
+    //V3_state_run();
+
+    //uint8_t temp_buffer[16];
+    //bg_thermometer_create_measurement(temp_buffer, bg_uint32_to_float(temperature_counter, 0), 0);
+    //gecko_cmd_gatt_server_send_characteristic_notification(0xff, gattdb_gatt_spp_data, 16, temp_buffer);
     //gecko_cmd_gatt_server_send_characteristic_notification(0xff, gattdb_temperature_measurement, 5, temp_buffer);
   }
-
+#else
   /* Done starting everyone else so let's exit */
   // MTM: Remove Delete
-  //OSTaskDel((OS_TCB *)0, &err);
+  OSTaskDel((OS_TCB *)0, &err);
+#endif
 }
 
 /***************************************************************************//**
@@ -491,3 +545,6 @@ void OSIdleContextHook(void)
     SleepAndSyncProtimer();
   }
 }
+
+
+
