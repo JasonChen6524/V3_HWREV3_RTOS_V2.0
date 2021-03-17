@@ -84,7 +84,7 @@
 
 #define  OS_CFG_SCHED_LOCK_TIME_MEAS_EN                     DEF_DISABLED
 
-#define  OS_CFG_SCHED_ROUND_ROBIN_EN                        DEF_DISABLED
+#define  OS_CFG_SCHED_ROUND_ROBIN_EN                        DEF_ENABLED                                                   // DEF_DISABLED
 
 #if (RTOS_DEBUG_MODE == DEF_ENABLED)
 
@@ -98,7 +98,7 @@
 
 #define  OS_CFG_DBG_EN                                      DEF_DISABLED
 
-#define  OS_CFG_TS_EN                                       DEF_DISABLED
+#define  OS_CFG_TS_EN                                       DEF_ENABLED                                                    // DEF_DISABLED
 
 #define  OS_CFG_STK_SIZE_MIN                                48u
 
@@ -314,9 +314,9 @@
  *********************************************************************************************************
  */
 
-#define  OS_CFG_TMR_EN                                      DEF_ENABLED                                                 //DEF_DISABLED, Changed by Jason
+#define  OS_CFG_TMR_EN                                      DEF_ENABLED                                                     // DEF_DISABLED, Changed by Jason
 
-#define  OS_CFG_TMR_DEL_EN                                  DEF_DISABLED
+#define  OS_CFG_TMR_DEL_EN                                  DEF_ENABLED                                                     // DEF_DISABLED, Modified by Jason Chen, 2021.03.15
 
 /*
  *********************************************************************************************************

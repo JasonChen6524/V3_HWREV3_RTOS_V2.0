@@ -113,7 +113,7 @@
 
 #define  LIB_MEM_CFG_DBG_INFO_EN                            DEF_DISABLED
 
-#define  LIB_MEM_CFG_HEAP_SIZE                              0uL
+#define  LIB_MEM_CFG_HEAP_SIZE                              8192uL                                                               // 0uL, Modified by Jason Chen, 2021.03.15
 
 #endif
 

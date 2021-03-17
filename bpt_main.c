@@ -132,7 +132,7 @@ static struct{
 };
 
 //static uint8_t hostOperatingMode = HOSTMODEAPPLICATION;
-#if 1
+#if 0
 sl_sleeptimer_timer_handle_t bpt_timer;
 static uint16_t bpt_second_count = 0;
 void bpt_timer_callback(sl_sleeptimer_timer_handle_t *handle, void *data)
@@ -572,6 +572,7 @@ void bpt_main(void)
 				printLog("TIMEOUT/FAULT CONDITION OCCURED FOR EXAMPLE MEASUREMENT. \r\n");
 			  //is_example_measurement_active =  false;
 				calibrationTimer_stop();
+				calibrationTimer_reset();                                  // Added by Jason Chen, 2021.03.16
 				SH_Max3010x_stop(0);
 				appState = ST_EXAMPLEUSER_DELAY_COUNT;                     //Jason //ST_COMMAND_MODE;
 				delay_ms_count = 0;
@@ -614,7 +615,7 @@ void bpt_main(void)
 		}
 
 		//wait_ms(2);
-		SH_Max3010x_data_report_execute();
+		SH_Max3010x_data_report_execute02();
 	}
 }
 
@@ -624,6 +625,7 @@ void bpt_main_reset(void)
 	printLog("TIMEOUT/FAULT CONDITION OCCURED FOR EXAMPLE MEASUREMENT. \r\n");
   //is_example_measurement_active =  false;
 	calibrationTimer_stop();
+	calibrationTimer_reset();                                  // Added by Jason Chen, 2021.03.16
 	SH_Max3010x_stop(0);
 	appState = ST_EXAMPLEUSER_DELAY_COUNT;                     //Jason //ST_COMMAND_MODE;
 	delay_ms_count = 0;

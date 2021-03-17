@@ -330,7 +330,7 @@ static int num_samplesLeft = 0;
 static int databufLen;
 static uint8_t *databuf;
 static Max30101_SH_Status_Tracker_t *p_glbl_max3010x_status_track;
-#define READ_SAMPLES_LIMIT  8
+#define READ_SAMPLES_LIMIT 8
 void SH_Max3010x_data_report_execute02(void)
 {
 	static int status = -1;
@@ -394,11 +394,19 @@ void SH_Max3010x_data_report_execute02(void)
 
 		   //wait_ms(5);
 		   status = sh_read_fifo_data(num_samples, sample_size, &databuf[0], databufLen);
-		   if(status != 0x00 /*SS_SUCCESS*/){
+		   if(status != 0x00 /*SS_SUCCESS*/)
+		   {
+#if 1
 			   num_samples = 0;
 			   sh_enable_irq_mfioevent();
 			   read_state = 0;
 			   return;
+#else
+			   num_samples = num_samples + num_samplesLeft;
+			   sh_enable_irq_mfioevent();
+			   read_state = 1;
+			   return;
+#endif
 		   }
 		   sh_enable_irq_mfioevent();
 
@@ -468,10 +476,17 @@ void SH_Max3010x_data_report_execute02(void)
 		   //wait_ms(5);
 		   status = sh_read_fifo_data(num_samples, sample_size, &databuf[0], databufLen);
 		   if(status != 0x00 /*SS_SUCCESS*/){
+#if 1
 			   num_samples = 0;
 			   sh_enable_irq_mfioevent();
 			   read_state = 0;
 			   return;
+#else
+			   num_samples = num_samples + num_samplesLeft;
+			   sh_enable_irq_mfioevent();
+			   read_state = 1;
+			   return;
+#endif
 		   }
 		   sh_enable_irq_mfioevent();
 

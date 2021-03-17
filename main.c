@@ -124,7 +124,7 @@
     .MemSeg          = DEF_NULL,      \
     .TickRate        = 1000u          \
 }
-#else
+#elif 0
 #define  OS_INIT_CFG_APP            { \
     ISR_CFG                           \
     TIMER_TASK_CFG                    \
@@ -132,6 +132,23 @@
     .TaskStkLimit    = 0u,            \
     .MemSeg          = DEF_NULL,      \
     .TickRate        = 1000u          \
+}
+#else
+// Added by Jason Chen, 2021.03.15
+#define  OS_INIT_CFG_APP                    { \
+	ISR_CFG                                   \
+    TIMER_TASK_CFG                            \
+    .MsgPoolSize = 501u,                      \
+    .TaskStkLimit = 10u,                      \
+    .StatTaskCfg =                            \
+    {                                         \
+      .StkBasePtr = DEF_NULL,                 \
+      .StkSize = 256u,                        \
+      .Prio = KERNEL_STAT_TASK_PRIO_DFLT,     \
+      .RateHz = 10u                           \
+    },                                        \
+    .MemSeg = DEF_NULL,                       \
+    .TickRate = 1000u                         \
 }
 #endif
 
@@ -241,7 +258,7 @@ static  CPU_STK  TimerTaskStk[TIMER_TASK_STK_SIZE];
 #endif
 
 static OS_TMR bpt_stateTimer;
-
+static OS_TMR bpt_stateTimer_oneShot;
 extern OS_MUTEX I2CMutex;
 extern OS_Q    I2C_Queue;
 extern OS_Q    V3_Queue;
@@ -423,12 +440,27 @@ void bpt_stateTimer_Start(void)
 	APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 }
 
+void bpt_stateTimer_OneShortStart(void)
+{
+	RTOS_ERR  err;
+	OSTmrStart(&bpt_stateTimer_oneShot, &err);
+	APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+}
+
 void bpt_stateTimer_Stop(void)
 {
 	RTOS_ERR  err;
 	OSTmrStop(&bpt_stateTimer, OS_OPT_TMR_NONE, DEF_NULL, &err);
 	APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 }
+
+//static inline void I2CPost_One_time(RTOS_ERR* err)
+//{
+//  OSMutexPost((OS_MUTEX *)&I2CMutex,
+//              (OS_OPT    ) OS_OPT_POST_NONE,
+//              (RTOS_ERR *) err);
+//  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
+//}
 
 extern void bpt_state_runCallback(void *p_tmr, void *p_arg);
 //extern void V3_state_run(void);
@@ -456,10 +488,28 @@ static  void  App_TaskThermometer(void *p_arg)
   BSP_OS_Init();                                                /* Initialize the BSP. It is expected that the BSP ...  */
                                                                 /* ... will register all the hardware controller to ... */
                                                                 /* ... the platform manager at this moment.             */
-#if 0
+
   OSMutexCreate(&I2CMutex,
                 "Light Mutex",
                 &err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+
+#if 0
+  OSQCreate((OS_Q     *)&V3_Queue,
+              (CPU_CHAR *)"V3 Queue",
+              (OS_MSG_QTY) 500,
+              (RTOS_ERR *)&err);
+    APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+
+  // create one-shot timer for direction array
+  OSTmrCreate(&bpt_stateTimer_oneShot,  /*   Pointer to user-allocated timer.   */
+              "Demo Timer Direction",   /*   Name used for debugging.           */
+              1,                        /*   20 Timer Ticks timeout.            */
+              0,                        /*   Unused                             */
+              OS_OPT_TMR_ONE_SHOT,      /*   Timer is one-shot.                 */
+			  &bpt_state_runCallback,   /*   Called when timer expires.         */
+              DEF_NULL,                 /*   No arguments to callback.          */
+              &err);
   APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 
   OSQCreate((OS_Q     *)&I2C_Queue,
@@ -468,24 +518,16 @@ static  void  App_TaskThermometer(void *p_arg)
             (RTOS_ERR *)&err);
   APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 
-  OSQCreate((OS_Q     *)&V3_Queue,
-            (CPU_CHAR *)"Demo Queue",
-            (OS_MSG_QTY) 32,
-            (RTOS_ERR *)&err);
-  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
-#endif
-
-
-  OSTmrCreate(&bpt_stateTimer,         /* Pointer to user-allocated timer. */
-              "Proprietary Timer",       /* Name used for debugging.         */
+  OSTmrCreate(&bpt_stateTimer,           /* Pointer to user-allocated timer. */
+              "bpt state machine",       /* Name used for debugging.         */
               0,                         /* 0 initial delay.                 */
               10,                        /* 100 Timer Ticks period.          */
               OS_OPT_TMR_PERIODIC,       /* Timer is periodic.               */
-              &bpt_state_runCallback, /* Called when timer expires.       */
+              &bpt_state_runCallback,    /* Called when timer expires.       */
               DEF_NULL,                  /* No arguments to callback.        */
               &err);
   APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
-
+#endif
   // Create task for Event handler
   OSTaskCreate((OS_TCB     *)&ApplicationTaskTCB,
                (CPU_CHAR   *)"Bluetooth Application Task",
@@ -502,19 +544,18 @@ static  void  App_TaskThermometer(void *p_arg)
                (RTOS_ERR   *)&err);
   APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 
-  // Start the Thermometer Loop. This call does NOT return.
-#if 0
+#if 1
   while (DEF_TRUE)
   {
-    OSTimeDlyHMSM(0, 0, 0, 100,
-                  OS_OPT_TIME_DLY | OS_OPT_TIME_HMSM_NON_STRICT,
-                  &err);
-    temperature_counter--;
-    if (temperature_counter < 0) {
-      temperature_counter = 59;
-    }
+	//OSTimeDlyHMSM(0, 0, 0, 10,
+	//		  OS_OPT_TIME_DLY | OS_OPT_TIME_HMSM_NON_STRICT,
+	//		  &err);
+    //temperature_counter--;
+    //if (temperature_counter < 0) {
+    //  temperature_counter = 59;
+    //}
 
-    //bpt_state_run();
+	bpt_state_runCallback(NULL, NULL);
     //V3_state_run();
 
     //uint8_t temp_buffer[16];

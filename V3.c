@@ -636,8 +636,8 @@ v3combo.combonum = 0;
       
    v3status.temp0 = Temperature(MAX30208A_ADR); // read temperature sensor A
    // TEMPORARY - populate second sensor field with first until second sensor HW is available
-   //v3status.temp1 = v3status.temp0;
-   v3status.temp1 = Temperature(MAX30208B_ADR); // read temperature sensor B
+   v3status.temp1 = v3status.temp0;
+   //v3status.temp1 = Temperature(MAX30208B_ADR); // read temperature sensor B
 
 #if 1
    printLog("Temp A %d\r\n",v3status.temp0/20);
@@ -654,7 +654,7 @@ v3combo.combonum = 0;
 
 #if 1
    v3status.bio_state  = appState;
-   v3status.bio_status = calibrationTimer_read();
+   v3status.bio_status = bptTimer_read();//calibrationTimer_read();
 #endif
 
    if (v3combo.awakesec) v3_ack_handle((union v3_message_UNION*)&v3status);  // Send status and store message, unsolicited 
