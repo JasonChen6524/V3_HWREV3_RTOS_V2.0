@@ -138,7 +138,7 @@
 #define  OS_INIT_CFG_APP                    { \
 	ISR_CFG                                   \
     TIMER_TASK_CFG                            \
-    .MsgPoolSize = 501u,                      \
+    .MsgPoolSize = 100u,                      \
     .TaskStkLimit = 10u,                      \
     .StatTaskCfg =                            \
     {                                         \
@@ -300,7 +300,7 @@ static inline void bg_thermometer_create_measurement(uint8_t* buffer, uint32_t m
  *********************************************************************************************************
  *********************************************************************************************************
  */
-
+extern void bsp_my_init(void);
 /*
  *********************************************************************************************************
  *                                                main()
@@ -463,11 +463,13 @@ void bpt_stateTimer_Stop(void)
 //}
 
 extern void bpt_state_runCallback(void *p_tmr, void *p_arg);
-//extern void V3_state_run(void);
+extern void bpt_state_runCB(void *p_tmr, void *p_arg);
+//extern uint16_t calibrationTimer_read(void);
+uint8_t temp_buffer[16];
 static  void  App_TaskThermometer(void *p_arg)
 {
   RTOS_ERR  err;
-  //int temperature_counter = 60;                                 /* A temperature value counting up */
+  //int temperature_counter = 10;                                 /* A temperature value counting up */
   CORE_DECLARE_IRQ_STATE;
 
   PP_UNUSED_PARAM(p_arg);                                       /* Prevent compiler warning.                            */
@@ -488,28 +490,29 @@ static  void  App_TaskThermometer(void *p_arg)
   BSP_OS_Init();                                                /* Initialize the BSP. It is expected that the BSP ...  */
                                                                 /* ... will register all the hardware controller to ... */
                                                                 /* ... the platform manager at this moment.             */
-
   OSMutexCreate(&I2CMutex,
                 "Light Mutex",
                 &err);
   APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 
-#if 0
-  OSQCreate((OS_Q     *)&V3_Queue,
-              (CPU_CHAR *)"V3 Queue",
-              (OS_MSG_QTY) 500,
-              (RTOS_ERR *)&err);
-    APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+  bsp_my_init();
 
+#if 0
   // create one-shot timer for direction array
   OSTmrCreate(&bpt_stateTimer_oneShot,  /*   Pointer to user-allocated timer.   */
               "Demo Timer Direction",   /*   Name used for debugging.           */
-              1,                        /*   20 Timer Ticks timeout.            */
+              5,                        /*   20 Timer Ticks timeout.            */
               0,                        /*   Unused                             */
               OS_OPT_TMR_ONE_SHOT,      /*   Timer is one-shot.                 */
 			  &bpt_state_runCallback,   /*   Called when timer expires.         */
               DEF_NULL,                 /*   No arguments to callback.          */
               &err);
+  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
+
+  OSQCreate((OS_Q     *)&V3_Queue,
+		    (CPU_CHAR *)"V3 Queue",
+            (OS_MSG_QTY) 32,
+            (RTOS_ERR *)&err);
   APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(err) == RTOS_ERR_NONE), 1);
 
   OSQCreate((OS_Q     *)&I2C_Queue,
@@ -547,20 +550,33 @@ static  void  App_TaskThermometer(void *p_arg)
 #if 1
   while (DEF_TRUE)
   {
-	//OSTimeDlyHMSM(0, 0, 0, 10,
-	//		  OS_OPT_TIME_DLY | OS_OPT_TIME_HMSM_NON_STRICT,
-	//		  &err);
-    //temperature_counter--;
-    //if (temperature_counter < 0) {
-    //  temperature_counter = 59;
-    //}
-
+#if 1
+	int32_t curren_tick1 = sl_sleeptimer_get_tick_count();
 	bpt_state_runCallback(NULL, NULL);
-    //V3_state_run();
+	int32_t diff = sl_sleeptimer_get_tick_count() - curren_tick1;
+	diff = sl_sleeptimer_tick_to_ms(diff);
 
+    //V3_state_run();
     //uint8_t temp_buffer[16];
     //bg_thermometer_create_measurement(temp_buffer, bg_uint32_to_float(temperature_counter, 0), 0);
-    //gecko_cmd_gatt_server_send_characteristic_notification(0xff, gattdb_gatt_spp_data, 16, temp_buffer);
+
+    //temperature_counter++;
+    //temp_buffer[8] = diff;
+    //if (temperature_counter > 10) {
+    //  temperature_counter = 0;
+    //  temp_buffer[0] = calibrationTimer_read();
+    //  gecko_cmd_gatt_server_send_characteristic_notification(0xFF, gattdb_gatt_spp_data, 9, temp_buffer);
+    //}
+
+    diff = 100 - diff;
+    if(diff > 0)
+    {
+    	OSTimeDlyHMSM(0, 0, 0, diff,
+    			OS_OPT_TIME_DLY | OS_OPT_TIME_HMSM_NON_STRICT, &err);
+    }
+#else
+    bpt_state_runCB(NULL, NULL);
+#endif
     //gecko_cmd_gatt_server_send_characteristic_notification(0xff, gattdb_temperature_measurement, 5, temp_buffer);
   }
 #else

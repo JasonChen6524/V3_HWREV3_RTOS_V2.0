@@ -163,8 +163,8 @@ void initI2C(void)
 
 int I2C_READ(U8 addr, U8 reg, U8 *data, U16 len)
 {
-I2C_TransferSeq_TypeDef    seq;
-I2C_TransferReturn_TypeDef ret; 
+	I2C_TransferSeq_TypeDef    seq;
+	I2C_TransferReturn_TypeDef ret;
 
     seq.addr = addr;
     seq.flags = I2C_FLAG_WRITE_READ;
@@ -173,22 +173,32 @@ I2C_TransferReturn_TypeDef ret;
     seq.buf[1].len = len;
     seq.buf[0].data = &reg;
     seq.buf[1].data = data;
-    
+#ifdef MUTEX_ADD
+	RTOS_ERR                   err;
+    I2CPend(&err);
     // Do a polled transfer
     ret = I2C_TransferInit(I2C0, &seq);
     while (ret == i2cTransferInProgress)
     {
       ret = I2C_Transfer(I2C0);
     }
-
-     return ((int) ret);
+    I2CPost(&err);
+#else
+    // Do a polled transfer
+    ret = I2C_TransferInit(I2C0, &seq);
+    while (ret == i2cTransferInProgress)
+    {
+      ret = I2C_Transfer(I2C0);
+    }
+#endif
+    return ((int) ret);
 
 }
 
 int I2C_WRITE(U8 addr, U8 reg , U8 *data, U16 len)
 {
-I2C_TransferSeq_TypeDef    seq;
-I2C_TransferReturn_TypeDef ret; 
+	I2C_TransferSeq_TypeDef    seq;
+	I2C_TransferReturn_TypeDef ret;
 
     seq.addr = addr;
     seq.flags = I2C_FLAG_WRITE_WRITE;
@@ -197,15 +207,25 @@ I2C_TransferReturn_TypeDef ret;
     seq.buf[1].len = len;
     seq.buf[0].data = &reg;
     seq.buf[1].data = data;
-    
+#ifdef MUTEX_ADD
+	RTOS_ERR                   err;
+    I2CPend(&err);
     // Do a polled transfer
     ret = I2C_TransferInit(I2C0, &seq);
     while (ret == i2cTransferInProgress)
     {
       ret = I2C_Transfer(I2C0);
     }
-
-     return ((int) ret);
+    I2CPost(&err);
+#else
+    // Do a polled transfer
+    ret = I2C_TransferInit(I2C0, &seq);
+    while (ret == i2cTransferInProgress)
+    {
+      ret = I2C_Transfer(I2C0);
+    }
+#endif
+    return ((int) ret);
 }
 
 int m_i2cBus_read(U8 addr, U8 *data, U16 len)                                          // Added by Jason for Biosensor read
@@ -213,23 +233,32 @@ int m_i2cBus_read(U8 addr, U8 *data, U16 len)                                   
 	I2C_TransferSeq_TypeDef    seq;
 	I2C_TransferReturn_TypeDef ret;
 
-	    seq.addr = addr;
-	    seq.flags = I2C_FLAG_READ;
+	seq.addr = addr;
+	seq.flags = I2C_FLAG_READ;
 
-	    seq.buf[1].len = 0;
-	    seq.buf[1].data = NULL;
-	    seq.buf[0].len = len;
-	    seq.buf[0].data = data;
-
-	    // Do a polled transfer
-	    ret = I2C_TransferInit(I2C0, &seq);
-	    while (ret == i2cTransferInProgress)
-	    {
-	      ret = I2C_Transfer(I2C0);
-	    }
-
-	     return ((int) ret);
-
+	seq.buf[1].len = 0;
+	seq.buf[1].data = NULL;
+	seq.buf[0].len = len;
+	seq.buf[0].data = data;
+#ifdef MUTEX_ADD
+	RTOS_ERR                   err;
+	I2CPend(&err);
+	// Do a polled transfer
+	ret = I2C_TransferInit(I2C0, &seq);
+	while (ret == i2cTransferInProgress)
+	{
+		ret = I2C_Transfer(I2C0);
+	}
+	I2CPost(&err);
+#else
+	// Do a polled transfer
+	ret = I2C_TransferInit(I2C0, &seq);
+	while (ret == i2cTransferInProgress)
+	{
+		ret = I2C_Transfer(I2C0);
+	}
+#endif
+	return ((int) ret);
 }
 
 int m_i2cBus_write(U8 addr, U8 *cmd_bytes, int cmd_bytes_len, bool flag)               // Added by Jason for Biosensor Write
@@ -237,28 +266,38 @@ int m_i2cBus_write(U8 addr, U8 *cmd_bytes, int cmd_bytes_len, bool flag)        
 	I2C_TransferSeq_TypeDef    seq;
 	I2C_TransferReturn_TypeDef ret;
 
-	    seq.addr = addr;
-	    seq.flags = I2C_FLAG_WRITE_WRITE;
+	seq.addr = addr;
+	seq.flags = I2C_FLAG_WRITE_WRITE;
 
-	    seq.buf[0].len = cmd_bytes_len;
-	    seq.buf[0].data = cmd_bytes;
-	    seq.buf[1].len = 0;
-	    seq.buf[1].data = NULL;
-
-	    // Do a polled transfer
-	    ret = I2C_TransferInit(I2C0, &seq);
-	    while (ret == i2cTransferInProgress)
-	    {
-	      ret = I2C_Transfer(I2C0);
-	    }
-
-	     return ((int) ret);
+	seq.buf[0].len = cmd_bytes_len;
+	seq.buf[0].data = cmd_bytes;
+	seq.buf[1].len = 0;
+	seq.buf[1].data = NULL;
+#ifdef MUTEX_ADD
+	RTOS_ERR                   err;
+	I2CPend(&err);
+	// Do a polled transfer
+	ret = I2C_TransferInit(I2C0, &seq);
+	while (ret == i2cTransferInProgress)
+	{
+		ret = I2C_Transfer(I2C0);
+	}
+	I2CPost(&err);
+#else
+	// Do a polled transfer
+	ret = I2C_TransferInit(I2C0, &seq);
+	while (ret == i2cTransferInProgress)
+	{
+		ret = I2C_Transfer(I2C0);
+	}
+#endif
+	return ((int) ret);
 }
 
 int I2C_CMD_IO(U8 addr, U8 *data)
 {
-I2C_TransferSeq_TypeDef    seq;
-I2C_TransferReturn_TypeDef ret;
+	I2C_TransferSeq_TypeDef    seq;
+	I2C_TransferReturn_TypeDef ret;
 
     seq.addr = addr;
     seq.flags = I2C_FLAG_WRITE_READ;
@@ -267,13 +306,24 @@ I2C_TransferReturn_TypeDef ret;
     seq.buf[1].len = 1;
     seq.buf[0].data = data;
     seq.buf[1].data = data+3;
-
+#ifdef MUTEX_ADD
+	RTOS_ERR                   err;
+    I2CPend(&err);
     // Do a polled transfer
     ret = I2C_TransferInit(I2C0, &seq);
     while (ret == i2cTransferInProgress)
     {
       ret = I2C_Transfer(I2C0);
     }
+    I2CPost(&err);
+#else
+    // Do a polled transfer
+    ret = I2C_TransferInit(I2C0, &seq);
+    while (ret == i2cTransferInProgress)
+    {
+      ret = I2C_Transfer(I2C0);
+    }
+#endif
     return ((int) ret);
 
 }

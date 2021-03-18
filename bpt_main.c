@@ -132,7 +132,7 @@ static struct{
 };
 
 //static uint8_t hostOperatingMode = HOSTMODEAPPLICATION;
-#if 0
+#if 1
 sl_sleeptimer_timer_handle_t bpt_timer;
 static uint16_t bpt_second_count = 0;
 void bpt_timer_callback(sl_sleeptimer_timer_handle_t *handle, void *data)

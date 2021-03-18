@@ -148,6 +148,7 @@ static void max30101_data_rx(uint8_t* data_ptr) {
 }
 
 uint16_t re_trigger = 0;
+extern uint8_t temp_buffer[16];
 static void bpt_data_rx(uint8_t* data_ptr) {
 
 	//See API doc for data format
@@ -250,6 +251,25 @@ static void bpt_data_rx(uint8_t* data_ptr) {
     v3status.bio_hr     = sample.hr;
     v3status.bio_spo2   = sample.spo2;
     v3status.bio_state  = (uint8_t) appState;
+
+    temp_buffer[1] = v3status.bio_prog;
+    temp_buffer[7] = v3status.bio_state;
+    if(sample.prog == 100)
+    {
+    	//temp_buffer[0] = v3status.bio_status;
+    	temp_buffer[2] = v3status.bio_hr/10;
+    	temp_buffer[3] = v3status.bio_spo2/10;
+    	temp_buffer[4] = v3status.bio_sys_bp;
+    	temp_buffer[5] = 1;
+    	temp_buffer[6] = v3status.bio_dia_bp;
+    }
+    if(sample.hr)
+    	temp_buffer[2] = v3status.bio_hr/10;
+
+    if(sample.spo2)
+    {
+    	temp_buffer[3] = v3status.bio_spo2/10;
+    }
 }
 
 static void agc_data_rx(uint8_t* data_ptr) {

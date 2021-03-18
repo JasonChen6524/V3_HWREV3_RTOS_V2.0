@@ -57,31 +57,6 @@
 #define TIC_TIMER_CONST 32768
 #define TIC_TIMER_PERSEC 10
 
-typedef enum {
-  DEMO_EVT_NONE                     = 0x00,
-  DEMO_EVT_BOOTED                   = 0x01,
-  DEMO_EVT_BLUETOOTH_CONNECTED      = 0x02,
-  DEMO_EVT_BLUETOOTH_DISCONNECTED   = 0x03,
-  DEMO_EVT_RAIL_READY               = 0x04,
-  DEMO_EVT_RAIL_ADVERTISE           = 0x05,
-  DEMO_EVT_LIGHT_CHANGED_BLUETOOTH  = 0x06,
-  DEMO_EVT_LIGHT_CHANGED_RAIL       = 0x07,
-  DEMO_EVT_INDICATION               = 0x08,
-  DEMO_EVT_INDICATION_SUCCESSFUL    = 0x09,
-  DEMO_EVT_INDICATION_FAILED        = 0x0A,
-  DEMO_EVT_BUTTON0_PRESSED          = 0x0B,
-  DEMO_EVT_BUTTON1_PRESSED          = 0x0C,
-  DEMO_EVT_CLEAR_DIRECTION          = 0x0D
-} I2CMsg;
-
-typedef enum {
-  PROP_STATUS_SEND                  = 0x00,
-  PROP_TIMER_EXPIRED                = 0x01,
-  PROP_TOGGLE_MODE                  = 0x02,
-  PROP_TOGGLE_RXD                   = 0x03,
-  V3_EVT_INDICATION                 = 0x04
-} V3_Msg;
-
 enum
 {
   //HANDLE_V3, HANDLE_EDDYSTONE, HANDLE_IBEACON  //include this code for Eddystone
@@ -125,16 +100,8 @@ static uint8 _min_packet_size = 20; // Target minimum bytes for one packet
 static uint8 boot_to_dfu = 0;
 
 OS_MUTEX I2CMutex;
-static inline void I2CPend(RTOS_ERR* err);
-static inline void I2CPost(RTOS_ERR* err);
-
-OS_Q    I2C_Queue;
-static inline I2CMsg I2CQueuePend(RTOS_ERR* err);
-static inline void I2CQueuePost(I2CMsg msg, RTOS_ERR* err);
-
-OS_Q    V3_Queue;
-static inline V3_Msg V3_QueuePend(RTOS_ERR* err);
-static inline void V3_QueuePost(V3_Msg msg, RTOS_ERR* err);
+OS_Q     I2C_Queue;
+OS_Q     V3_Queue;
 
 static void reset_variables()
 {
@@ -216,7 +183,7 @@ void bptTimer_stop(void)
 
 void bpt_state_runCallback(void *p_tmr, void *p_arg)
 {
-  RTOS_ERR  err;
+  //RTOS_ERR  err;
   /* Called when timer expires:                            */
   /*   'p_tmr' is pointer to the user-allocated timer.     */
   /*   'p_arg' is argument passed when creating the timer. */
@@ -237,13 +204,31 @@ void bpt_state_runCallback(void *p_tmr, void *p_arg)
   //I2CPend(&err);
   //if((v3status.spp == STATE_CONNECTED)||(v3status.spp == STATE_SPP_MODE))
   {
-	  bpt_main();
+  	bpt_main();
   }
   //I2CPost(&err);
+   //V3_QueuePost(V3_EVT_INDICATION, &err);
 }
 
-extern void bpt_stateTimer_Start(void);
-extern void bpt_stateTimer_OneShortStart(void);
+void bpt_state_runCB(void *p_tmr, void *p_arg)
+{
+  RTOS_ERR  err;
+  /* Called when timer expires:                            */
+  /*   'p_tmr' is pointer to the user-allocated timer.     */
+  /*   'p_arg' is argument passed when creating the timer. */
+  PP_UNUSED_PARAM(p_tmr);
+  PP_UNUSED_PARAM(p_arg);
+
+  V3_Msg v3_Msg;
+
+  v3_Msg = V3_QueuePend(&err);
+  if(v3_Msg == V3_EVT_INDICATION)
+  {
+  	  bpt_main();
+  }
+}
+//extern void bpt_stateTimer_Start(void);
+//extern void bpt_stateTimer_OneShortStart(void);
 void V3_state_run(void)
 {
 	static U8 sec_tic = TIC_TIMER_PERSEC;
@@ -405,10 +390,10 @@ static void BluetoothEventHandler(struct gecko_cmd_packet* evt)
 			{
 		         case OS_TIMER_HANDLE:
 		         {
-		        	 RTOS_ERR err;
-		        	 I2CPend(&err);
+		        	 //RTOS_ERR err;
+		        	 //I2CPend(&err);
 		        	 V3_state_run();
-		        	 I2CPost(&err);
+		        	 //I2CPost(&err);
 		        	 //V3_QueuePost(V3_EVT_INDICATION, &err);
 		        	 //bpt_stateTimer_OneShortStart();
 		         }
@@ -435,6 +420,32 @@ static void BluetoothEventHandler(struct gecko_cmd_packet* evt)
 		break;
 
 	}
+}
+
+void BluetoothEventHandler02(struct gecko_cmd_packet* evt)
+{
+  switch (BGLIB_MSG_ID(evt->header)) {
+    case gecko_evt_system_boot_id:
+    case gecko_evt_le_connection_closed_id:
+#ifdef OTA
+      if (boot_to_dfu) {
+        gecko_cmd_system_reset(2);
+      }
+#endif
+      //Start advertisement at boot, and after disconnection
+      gecko_cmd_le_gap_start_advertising(0, le_gap_general_discoverable, le_gap_connectable_scannable);
+      break;
+#ifdef OTA
+    case gecko_evt_gatt_server_user_write_request_id:
+      if (evt->data.evt_gatt_server_user_write_request.characteristic == gattdb_ota_control) {
+        //boot to dfu mode after disconnecting
+        boot_to_dfu = 1;
+        gecko_cmd_gatt_server_send_user_write_response(evt->data.evt_gatt_server_user_write_request.connection, gattdb_ota_control, bg_err_success);
+        gecko_cmd_le_connection_close(evt->data.evt_gatt_server_user_write_request.connection);
+      }
+      break;
+#endif
+  }
 }
 
 /*********************************************************************************************************
@@ -477,7 +488,7 @@ void  BluetoothApplicationTask(void *p_arg)
                NULL,
                &os_err);
 
-    BluetoothEventHandler((struct gecko_cmd_packet*)bluetooth_evt);
+    BluetoothEventHandler02((struct gecko_cmd_packet*)bluetooth_evt);
 
     OSFlagPost(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_HANDLED, OS_OPT_POST_FLAG_SET, &os_err);
   }
@@ -521,74 +532,6 @@ void  BluetoothApplicationTask(void *p_arg)
 	  OSFlagPost(&bluetooth_event_flags, (OS_FLAGS)BLUETOOTH_EVENT_FLAG_EVT_HANDLED, OS_OPT_POST_FLAG_SET, &os_err);
   }
 #endif
-}
-
-
-
-static inline I2CMsg I2CQueuePend(RTOS_ERR* err)
-{
-  I2CMsg i2cMsg;
-  OS_MSG_SIZE demoMsgSize;
-  i2cMsg = (I2CMsg)OSQPend((OS_Q*       )&I2C_Queue,
-                             (OS_TICK     ) 0,
-                             (OS_OPT      ) OS_OPT_PEND_NON_BLOCKING,                             //OS_OPT_PEND_BLOCKING
-                             (OS_MSG_SIZE*)&demoMsgSize,
-                             (CPU_TS*     ) DEF_NULL,
-                             (RTOS_ERR*   ) err);
-  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
-  return i2cMsg;
-}
-
-static inline void I2CQueuePost(I2CMsg msg, RTOS_ERR* err)
-{
-  OSQPost((OS_Q*      )&I2C_Queue,
-          (void*      ) msg,
-          (OS_MSG_SIZE) sizeof(void*),
-          (OS_OPT     ) OS_OPT_POST_FIFO + OS_OPT_POST_ALL,
-          (RTOS_ERR*  ) err);
-  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
-}
-
-static inline V3_Msg V3_QueuePend(RTOS_ERR* err)
-{
-  V3_Msg v3Msg;
-  OS_MSG_SIZE propMsgSize;
-  v3Msg = (V3_Msg)OSQPend((OS_Q*       )&V3_Queue,
-                             (OS_TICK     ) 0,
-                             (OS_OPT      ) OS_OPT_PEND_BLOCKING,
-                             (OS_MSG_SIZE*)&propMsgSize,
-                             (CPU_TS     *) DEF_NULL,
-                             (RTOS_ERR   *) err);
-  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
-  return v3Msg;
-}
-
-static inline void V3_QueuePost(V3_Msg msg, RTOS_ERR* err)
-{
-  OSQPost((OS_Q*      )&V3_Queue,
-          (void*      ) msg,
-          (OS_MSG_SIZE) sizeof(void*),
-          (OS_OPT     ) OS_OPT_POST_FIFO + OS_OPT_POST_ALL,
-          (RTOS_ERR*  ) err);
-  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
-}
-
-static inline void I2CPend(RTOS_ERR* err)
-{
-  OSMutexPend((OS_MUTEX *)&I2CMutex,
-              (OS_TICK   ) 0,
-              (OS_OPT    ) OS_OPT_PEND_BLOCKING,
-              (CPU_TS   *) DEF_NULL,
-              (RTOS_ERR *) err);
-  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
-}
-
-static inline void I2CPost(RTOS_ERR* err)
-{
-  OSMutexPost((OS_MUTEX *)&I2CMutex,
-              (OS_OPT    ) OS_OPT_POST_NONE,
-              (RTOS_ERR *) err);
-  APP_RTOS_ASSERT_DBG((RTOS_ERR_CODE_GET(*err) == RTOS_ERR_NONE), 1);
 }
 
 void bcnSetupAdvBeaconing(void)
